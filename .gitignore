@@ -1,0 +1,37 @@
+# --- 資格情報 -----------------------------------------------------------
+# Google Cloud の service account key を絶対に入れない
+*service-account*.json
+*credentials*.json
+client_secret*.json
+application_default_credentials.json
+*.pem
+*.key
+.env
+.env.*
+!.env.example
+
+# --- 睡眠データ ---------------------------------------------------------
+# 本人の実際の睡眠記録。commit すると履歴から消しにくく、ハッカソンの審査員も
+# リポジトリを読む。入れると決めてから外すこと（README の注意書きと対応）。
+data/
+
+# --- Go -----------------------------------------------------------------
+/suyasuya
+/bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# --- ローカル DB / 生成物 ------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+/dist/
+/tmp/
+
+# --- エディタ / OS -------------------------------------------------------
+.DS_Store
+*.swp
+.idea/
+.vscode/
