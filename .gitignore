@@ -9,6 +9,7 @@ application_default_credentials.json
 .env
 .env.*
 !.env.example
+!.env.sample
 
 # --- 睡眠データ ---------------------------------------------------------
 # 本人の実際の睡眠記録。commit すると履歴から消しにくく、ハッカソンの審査員も

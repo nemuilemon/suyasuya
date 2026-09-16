@@ -1,11 +1,19 @@
-# アーキテクチャ（本番）
+# アーキテクチャ（開発・本番）
 
 **状態：方針決定。未実装。**
 
 ## 構成
 
-本番は **GKE** に置く。container は 2 つに割り、DB は **PostgreSQL**、
+**開発中は local の Docker Compose を使い、提出直前に GKE へ移行する。**
+dev は Cloudflare Tunnel 経由で使い、Cloudflare Access で本人だけを許可する。
+Tunnel の接続先は control に限定する。local の停止中は通知・job 処理も止まる。
+Tunnel は **ホストの既存 daemon を流用**する。Compose に cloudflared は追加せず、
+suyasuya の環境変数に Tunnel token は持たない。control の port はホストの loopback に公開する。
+
+アプリの container は 2 つに割り、DB は **PostgreSQL**、
 control と agent の間は **Redis** を queue として挟む。
+画像の読み取り・agent の判断・文面生成のモデルは **すべて Gemini** を使う。
+専用 API key は local では Git 管理外の `.env`、本番では Secret から渡す。
 
 | container | 役割 |
 |---|---|
@@ -15,8 +23,9 @@ control と agent の間は **Redis** を queue として挟む。
 両者とも Postgres に接続するが、**agent は自分の role の権限内でだけ触る**。
 実データ table は READ-ONLY、書けるのは結果系だけ。DDL は持たない。
 
-境界を「どの container か」ではなく **DB の権限**で引く。
-Go 側の配線ミスでは越えられない場所に線が置かれる。
+**読み書きできる table・列は DB role の権限で制限する。**
+user 間のデータ分離は、job ごとの closure に束縛した user_id と、
+repository の所有者条件で実現する。**今回は RLS を使わない。**
 
 ```
            ┌──────────┐
@@ -76,18 +85,48 @@ screenshot upload
 
 結果は後から UI に流れてくる。upload の応答では待たない。
 
+### 睡眠記録の確認・承認と手入力
+
+**画像の読み取り完了と、睡眠記録の確定を分ける。** agent は読み取り候補を
+`job_results` に保存して job を完了する。候補は未承認であり、
+`sleep_records` への反映や催促の評価はまだ行わない。
+
+```
+画像 → agent の読み取り候補 ─┐
+                            ├→ 管理 UI で user が確認・修正・承認
+画像なし → 主要数値の手入力 ─┘   → control が sleep_records に保存
+                                 → 評価 job → 応答・次の催促判断
+```
+
+- **本人の記録管理**：通常 user が自分の候補を確認し、修正・承認・却下できる。
+  プロンプト / skill を編集する管理者権限とは別にする。
+- **主要項目**：主睡眠 / 昼寝の種別、開始・終了日時、睡眠時間。
+  日付とタイムゾーンを持ち、日跨ぎを扱う。画像や睡眠段階の詳細は必須にしない。
+  不明な項目は欠測として保持し、時刻不明の記録を就寝時刻の評価に使わない。
+- **昼寝**：同日に複数件を保存できる。検出漏れは手入力で追加し、誤検知は却下する。
+  主睡眠との分類違い、時刻・睡眠時間も承認前に修正できる。
+  記録がないことを自動的に「昼寝なし」と解釈しない。
+- **確定経路**：control が所有者と入力値を検証し、承認した版・承認日時・
+  入力元（画像 / 手入力）を保存する。画像由来では元の候補と user の修正も辿れるようにする。
+  agent の実データへの書き込み権限は増やさない。
+- **一度だけ反映**：承認対象の版または手入力の送信 ID で重複保存を防ぐ。
+  記録の確定と評価 job の作成は同一 transaction とし、queue への再投入に対応する。
+  承認後の訂正・削除も版として残し、古い評価を無効化して最新の確定状態で再評価する。
+- **評価対象**：傾向分析・催促には有効な承認済み記録だけを渡す。
+  昼寝は主睡眠と区別して集計し、昼寝単独の追加では昨夜の催促を再評価しない。
+
 ### 進捗と結果の戻り
 
-**結果は agent が自分で Postgres に書く。** Redis を経由して control に返さない。
+**読み取り候補や評価結果は agent が自分で Postgres に書く。**
+Redis を経由して control に返さない。承認済み睡眠記録への反映は上記の control が担う。
 
 Redis に戻すと、上で置いた原則（`Redis が運ぶのは id だけ`）を
 結果の経路だけが破ることになる。Gemini の出力は**金を払って得た実体**で、
 list が飛べば再投入＝再課金でしか取り戻せない。
 生成できた時点で真実を Postgres に着地させるのが筋。
 
-control を経由しない副次的な効果として、**二重書きが構造的に起きない**。
-その job を実行した worker は 1 つしかいないので、control を何台に増やしても関係ない。
-結果を受けるためだけの list + `BLMOVE` は要らなくなる。
+結果を受けるためだけの list + `BLMOVE` は要らない。
+ただし同じ job が複数回実行されうるため、結果の重複は DB 制約で防ぐ。
 
 agent 側の書き方：
 
@@ -100,29 +139,32 @@ agent 側の書き方：
 完了通知も同じ channel でよい。
 
 通知が揮発してよい理由は、真実がもう Postgres にあるから。
-落ちても UI の更新が遅れるだけで、[未処理の行を拾い直す sweeper](#真実は-postgres-に置く) が回収する。
+UI は接続・再接続時と処理待ちの間に Postgres の状態を照会し、通知欠落を補う。
+sweeper は未処理 job の再投入を担い、完了済み job の表示更新とは分ける。
 list で守っていた頃と違い、**通知の取りこぼしが仕事の消失にならない。**
 
 ### agent の role
 
-権限は Postgres 側で絞る。Go の配線に依存させない。
+table・列への操作権限は Postgres 側で絞る。user ごとの範囲はアプリ側で制限する。
 
 ```sql
 -- agent 専用 role。DDL なし、DELETE なし
-GRANT SELECT ON sleep_records, pvt_results          TO suyasuya_agent;
+GRANT SELECT ON sleep_records, pvt_sessions         TO suyasuya_agent;
+GRANT SELECT ON jobs                               TO suyasuya_agent;
+GRANT SELECT ON agent_config_versions              TO suyasuya_agent;
 GRANT INSERT ON job_results                         TO suyasuya_agent;
 GRANT UPDATE (status, finished_at) ON jobs          TO suyasuya_agent;
 ```
 
 - **列単位で絞れる**。「結果 table 書き込みも可」を宣言として正確に書ける
 - **migration は control（または独立 job）が所有する。** agent に DDL を渡さない
-- **agent role を table の owner にしない。** owner は RLS を素通りする。
-  owner に持たせる必要がある場合は `ALTER TABLE ... FORCE ROW LEVEL SECURITY`
+- **agent role を table の owner にしない。** migration 用の権限を渡さず、
+  実行に必要な操作だけを GRANT する。
 
 agent は screenshot 経由の外部入力を LLM に食わせる、
 **prompt injection を最も浴びる container**。だが tool は domain 固有で任意 SQL を通さず、
-role は上記に限られ、さらに RLS が乗る。injection が通っても
-「その user の行を読む」以上には届かない。
+role は上記に限る。tool が使う user_id は closure に固定し、
+repository はその user の行だけを扱う。LLM の引数で他人の user_id を指定できない。
 
 ### UI への push
 
@@ -131,7 +173,7 @@ control が該当 job の進捗 channel を subscribe し、browser に流す。
 
 **subscribe 時に所有者を検査すること。**
 job_id を知っているだけで他人の進捗が読めてはいけない。
-tool 層・DB 層で引いた境界を、ここでも引く。
+認証済み user と job の所有者を照合し、tool と同じ user の範囲に制限する。
 
 ### 認証
 
@@ -141,6 +183,31 @@ tool 層・DB 層で引いた境界を、ここでも引く。
 
 → control の認証は **username / password の自前**に寄せる。
 Google OAuth を入口にしない。
+
+### user の測定時刻設定
+
+**PVT の測定時刻は user が設定する。** control の設定 UI で、本人の
+測定時刻とタイムゾーンを PostgreSQL に保存する。
+control の scheduler はこの設定に従って測定通知を発火する。
+実際の測定日時は PVT session に別途記録する（`pvt.md`）。
+
+### agent のプロンプト / skill 管理
+
+**agent 用のプロンプトと skill は PostgreSQL を正本にする。**
+control に管理 UI を置き、再デプロイせずに内容を微調整できるようにする。
+ここでいう skill は、agent に渡す作業手順・判断指針の定義。
+
+- **保存先**：`agent_config_versions` に定義の識別子・種類（prompt / skill）・
+  本文・版・更新者・更新日時を保存する。persona もプロンプトの一部として扱う。
+- **管理 UI**：管理者が内容を編集し、新しい版を有効化できる。
+  過去の版を残し、戻せるようにする。通常 user の測定時刻設定とは権限を分ける。
+- **読み込み**：job 開始時に有効な版を確定し、その job 内では固定する。
+  使用した各定義の版を job に記録し、判断履歴から辿れるようにする。
+- **権限**：更新は管理者認証・認可を経た control だけが行う。
+  agent は読み取り専用とし、プロンプトや skill を自分で書き換える tool は持たない。
+  tool の実装・利用可能な権限・実行上限はコード側で管理する。
+- **初期値**：repo 内に seed を持ち、空の DB へ投入できるようにする。
+  通常の起動やデプロイでは、管理 UI で調整した内容を上書きしない。
 
 ## ハッカソン要件との整合
 
@@ -157,9 +224,10 @@ Google OAuth を入口にしない。
 
 ### 原則：LLM に user_id を書かせない
 
-queue が運ぶのは `job_id` / `user_id` といった**制御情報だけ**。
-これを agent の実行文脈に**注入**し、tool call の query には
-**注入された値が自動で入る**。LLM は user_id に触れない。
+queue が運ぶのは **job_id だけ**。
+worker は Postgres の job から所有者の user_id を取得し、closure に束縛する。
+control は job 作成時に認証済み user の ID を保存する。
+tool call の query にはこの値が自動で入り、LLM は user_id に触れない。
 
 これがこの設計の要点になる。
 一般的な tool calling では、モデルが `get_sleep_records(user_id: "...")` のように
@@ -168,15 +236,15 @@ queue が運ぶのは `job_id` / `user_id` といった**制御情報だけ**。
 prompt injection が刺されば他人のデータに手が届く。
 
 ここでは user_id を **tool の引数から消す**。
-モデルが書けない以上、間違えようがない。
-分離が**構造で保証される**。
+これにより、モデルが読み取り先の user を選ぶ経路をなくす。
+分離は、正しい所有者の束縛と repository の user 条件によって成立する。
 
 ### 実装：closure で束ねる
 
 job ごとに tool set を組み立て、その時点の user_id を closure に閉じ込める。
 
 ```go
-func buildTools(db *sql.DB, uid UserID) []Tool {
+func buildTools(db DB, uid UserID) []Tool {
     return []Tool{
         {
             Name: "get_sleep_records",
@@ -196,19 +264,21 @@ func buildTools(db *sql.DB, uid UserID) []Tool {
 - **schema に user_id を載せない。** 「来ても無視する」ではなく、
   Gemini に渡す宣言から**消す**。載っていれば、いつか誰かが配線してしまう。
 - **tool set を job をまたいで使い回さない。** 常駐 process なので、
-  cache や global に置くと A の束縛が B の job に残る。**唯一の事故経路がここ。**
+  cache や global に置くと A の束縛が B の job に残る。
   job ごとに `buildTools` を呼ぶ。
 - **`type UserID string`** のような named type にする。
   素の `string` だと引数の取り違えが compile を通ってしまう。
 
-### 二重化
+### 今回の分離方式
 
-closure だけに頼らず、DB 側にも同じ境界を引く。
-Postgres の **RLS（Row Level Security）** を張り、接続時に
-`SET LOCAL app.user_id` を渡して、行がそもそも見えないようにする。
+**RLS は採用しない。** user_id を closure に束縛し、repository に明示的に渡す。
+user 所有のデータを読む・更新する query は必ず `WHERE user_id = ...` で範囲を絞る。
+record_id や job_id を指定する場合も、user 向け操作では所有者条件を併用する。
+INSERT の user_id も束縛した値を使い、LLM や request body の指定を採用しない。
 
-closure の配線ミスと RLS の設定ミスが**同時に起きない限り**漏れない。
-in-cluster Postgres でも RLS は普通に使える。
+control の記録承認・手入力・設定変更も、認証済み user の範囲で実行する。
+worker の job 取得、scheduler、管理者用設定は内部用の操作として分け、
+LLM の tool や通常 user の API に全 user 向けの操作を公開しない。
 
 ## DB は interface で切る
 
@@ -246,15 +316,12 @@ storage 層の都合を知らないはずの層が、知ってしまっている
 
 ### UserID との接続
 
-repository の各 method は **`UserID` を第一引数に取る**。
+user 所有のデータを扱う repository method は **`UserID` を明示的に取る**
+（`ctx` がある場合はその次）。agent の closure から渡された ID を、
+実装側で query の所有者条件に使う。
 
-これで「user に紐づかない query が存在しない」ことが、
-**interface 定義を読むだけで確かめられる**ようになる。
-agent の closure 束縛（上記）と同じ境界を、DB 側でも型で表現することになる。
-
-RLS は Postgres 固有なので、**実装側に閉じる**。
-interface が表明するのは「この user の範囲で読む」という意図だけ。
-engine が変われば WHERE 句で実現してもよい。
+interface は「この user の範囲で扱う」という契約を表し、
+内部用・管理者用の操作とは分ける。
 
 ### やりすぎない
 
@@ -290,7 +357,7 @@ goroutine と channel で素直に書ける範囲。framework を挟む理由は
 
 job ごとに `context.WithCancel` を張り、全ての I/O に通す。
 `QueryContext`、Gemini への `http.NewRequestWithContext`、tool call のループ。
-一箇所 cancel すれば全部が巻き戻る。これは ctx が設計上まさに担う仕事。
+cancel は進行中の処理に中止を伝える。保存済みの結果や送信済みの通知は巻き戻らない。
 
 `context.WithTimeout` も併せて張る。
 tool call の反復上限（上記）と二重に、暴走を時間でも止める。
@@ -299,13 +366,17 @@ tool call の反復上限（上記）と二重に、暴走を時間でも止め�
 user の「中止」は control から来るので、container をまたぐ経路が要る。
 
 ```
-control ──▶ Redis pub/sub (cancel channel) ──▶ agent
+control ──▶ Postgres に中止要求を保存
+        └─▶ Redis pub/sub (cancel channel) ──▶ agent
                                                  │
                                     job_id → cancel() の map を引く
 ```
 
 agent は job ごとの `cancel` を map に持ち、cancel 通知で該当 job を落とす。
-SIGTERM 時は root ctx を cancel して、全 job を一括で畳む。
+通知は即時反映の補助とし、agent は開始前・実行中・結果確定時にも DB の中止要求を確認する。
+中止済み job は再投入しない。完了済み job への中止は完了を取り消さない。
+SIGTERM 時は新規受付を止め、猶予時間内は実行中の job を待つ。
+猶予を超えたら root ctx を cancel する。終了に伴う中断は user の中止と区別し、再投入できる。
 
 #### 落とし穴：後始末に死んだ ctx を使わない
 
@@ -335,7 +406,9 @@ job に固有の束縛は closure、process の生死は ctx。この線を混�
 
 ## 未決
 
-### Redis の置き場所
+### 本番 Redis の置き場所
+
+開発中は Compose 内の Redis を使う。以下は GKE 移行時の選択肢。
 
 | 案 | 利点 | 難点 |
 |---|---|---|
@@ -347,7 +420,9 @@ queue の中身を捨てても復旧できる設計にしたので、**in-cluste
 
 ### DB の置き場所（暫定：in-cluster）
 
-一旦 **in-cluster** で進める。StatefulSet + PVC。
+開発中は **Compose + 永続 volume**。GKE 移行後は **StatefulSet + PVC** を暫定とする。
+移行時は local DB をバックアップし、記録と設定を本番へ引き継ぐ。
+dev の scheduler を止めてから本番を有効にし、通知の二重送信を防ぐ。
 
 注意点を 1 つだけ記録しておく。
 cluster を作り直すと**データが消えうる**。審査用のテストアカウントと
@@ -359,7 +434,7 @@ PVT の実測データ（`pvt.md` 参照）は積み上げに lead time があ�
 
 ## 運用上の注意
 
-**着手前に一度だけ判断し直すこと。**
+**GKE 移行準備時に確認すること。**
 
 - **GKE は cluster の管理費がかかる。** クーポン($300) を食う速度に直結するので、
   Autopilot か、無料枠の対象になる構成かを確認する
