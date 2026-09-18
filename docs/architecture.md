@@ -17,7 +17,7 @@ control と agent の間は **Redis** を queue として挟む。
 
 | container | 役割 |
 |---|---|
-| **control** | web app 本体。HTTP / UI、screenshot の受け口、通知の発火、job の投入。**schema と migration を所有する。** |
+| **control** | web app 本体。HTTP / UI、画像 PUT 用の署名付き URL 発行と完了確認、通知の発火、job の投入。**schema と migration を所有する。** |
 | **agent** | agent loop。queue から job を取り、Gemini を呼ぶ（画像からの読み取り、提案文の生成）。状態を持たない。 |
 
 両者とも Postgres に接続するが、**agent は自分の role の権限内でだけ触る**。
@@ -77,13 +77,37 @@ agent の仕事は Gemini を挟むので秒〜分かかる。
 **UI request を agent の完了で待たせない。**
 
 ```
-screenshot upload
-  → Postgres に行を作る（状態: pending）
-  → Redis に job_id を積む
-  → 即 202 を返す
+browser → control：画像の upload を要求
+  → control が uploads 行を作り、GCS の PUT 用署名付き URL を返す
+browser → Cloud Storage：画像を直接 PUT
+browser → control：upload_id の完了を通知
+  → control が GCS の実体を確認し、uploads の確定と jobs の作成を行う
+  → Redis に job_id を積み、202 を返す
 ```
 
 結果は後から UI に流れてくる。upload の応答では待たない。
+
+### 画像の保存先：Cloud Storage
+
+**local dev から非公開の GCS bucket を使う。** 画像本体は browser から直接 PUT し、
+PostgreSQL の `uploads` には bucket・object 名・サイズ・generation・状態だけを保存する。
+
+- control が所有者に紐づく一意の object 名を決め、短い期限の **V4 signed URL** を発行する。
+  HTTP method は PUT、Content-Type と新規作成条件（`x-goog-if-generation-match: 0`）を署名に含める。
+  browser は指定されたヘッダーで送信し、同じ URL による上書きを防ぐ。
+- bucket の CORS に dev / 本番の origin と PUT を設定する。画像の確認表示も署名付き GET を使う。
+  CORS は本人認証の代わりにせず、URL の発行・完了 API で所有者を確認する。
+- 完了 API は browser の申告だけで確定せず、GCS のサイズ・Content-Type を検証する。
+  アプリのサイズ上限・申告値と合わない画像は却下する。agent も画像として読み込めることを検証する。
+- 完了の再送で job が増えないよう upload_id から投入キーを作る。
+  agent は保存済み generation の画像を IAM 認証で取得して Gemini に渡す。
+  URL の有効期限に job の再試行を依存させない。
+- 期限切れの未完了 upload は、GCS の残存 object と併せて定期的に掃除する。
+  GKE 移行時も画像は GCS に残し、DB の参照を引き継ぐ。
+
+署名用の service account と GCS 認証は Gemini API key とは別に用意する。
+参考：[Signed URLs](https://cloud.google.com/storage/docs/access-control/signed-urls)、
+[CORS](https://cloud.google.com/storage/docs/cross-origin)。
 
 ### 睡眠記録の確認・承認と手入力
 
@@ -115,7 +139,21 @@ screenshot upload
 - **評価対象**：傾向分析・催促には有効な承認済み記録だけを渡す。
   昼寝は主睡眠と区別して集計し、昼寝単独の追加では昨夜の催促を再評価しない。
 
-### 進捗と結果の戻り
+### Pixel Watch のデータ連携（schema の準備）
+
+Pixel Watch 連携に向け、次の table も用意する（取得 API・同期処理は未実装）。
+
+- `watch_devices`：端末・取得元・同期の有効 / 無効・取得位置。
+- `watch_sleep_observations`：外部レコード ID と版を持つ取得原本。再取得を重複登録せず、元データの訂正も残す。
+- `sleep_watch_links`：画像・手入力の記録と、時刻の重なりで自動照合した候補。user が確認・却下できる。
+
+同期・関連付けの保存は control が担い、agent の実データへの書き込み権限は増やさない。
+watch 由来の記録も本人の確認・承認後に `sleep_records` に反映する。
+既に画像や手入力で登録済みなら関連付けを優先し、同じ睡眠を二重に集計しない。
+特に昼寝の誤検知は自動で確定せず、原本と修正値を分けて保持する。
+取得原本だけを承認済みの睡眠として分析しない。
+
+### job の結果保存
 
 **読み取り候補や評価結果は agent が自分で Postgres に書く。**
 Redis を経由して control に返さない。承認済み睡眠記録への反映は上記の control が担う。
@@ -146,6 +184,8 @@ list で守っていた頃と違い、**通知の取りこぼしが仕事の消�
 ### agent の role
 
 table・列への操作権限は Postgres 側で絞る。user ごとの範囲はアプリ側で制限する。
+実際の table・制約・GRANT は [`schema.sql`](../schema.sql) を正本とする。
+以下は権限の概要。worker の claim / 再試行用の列も schema 側で定義する。
 
 ```sql
 -- agent 専用 role。DDL なし、DELETE なし
@@ -197,12 +237,30 @@ control の scheduler はこの設定に従って測定通知を発火する。
 control に管理 UI を置き、再デプロイせずに内容を微調整できるようにする。
 ここでいう skill は、agent に渡す作業手順・判断指針の定義。
 
+**agent loop の制御プロンプトも管理 UI の編集対象にする。**
+どの情報を先に見るか、どの tool を呼ぶか、結果を受けて追加調査するか、
+材料不足で保留するか、いつ回答を確定して終了するかを微調整できる。
+
+| config_key の例 | 調整する内容 |
+|---|---|
+| `agent.loop` | 共通の判断手順、tool 選択、失敗時の代替手段・再試行の判断、終了・保留の条件 |
+| `job.extract_sleep` | OCR の読み取り指示、欠測・曖昧な値の扱い |
+| `job.evaluate_sleep` | 承認済み記録の評価方針 |
+| `job.plan_reminder` | 催促の要否・強度の判断方針 |
+| `persona.arisu` | 応答の声・文体 |
+
+共通の loop 指示と job 別の指示・使用する skill を組み合わせて Gemini に渡す。
+OCR のように原則 1 回の呼び出しで済む job に、不要な tool loop は強制しない。
+反復回数・timeout・通信の再試行上限・tool の許可範囲・user 分離・記録の承認は
+コード側で強制し、プロンプトの編集では解除できない。
+
 - **保存先**：`agent_config_versions` に定義の識別子・種類（prompt / skill）・
   本文・版・更新者・更新日時を保存する。persona もプロンプトの一部として扱う。
 - **管理 UI**：管理者が内容を編集し、新しい版を有効化できる。
   過去の版を残し、戻せるようにする。通常 user の測定時刻設定とは権限を分ける。
 - **読み込み**：job 開始時に有効な版を確定し、その job 内では固定する。
-  使用した各定義の版を job に記録し、判断履歴から辿れるようにする。
+  共通 loop 指示を含む使用版を `job_config_versions` に記録し、判断履歴から辿れるようにする。
+  有効化した変更は次に開始する未固定の job から適用し、実行中・再試行中の job は同じ版を使う。
 - **権限**：更新は管理者認証・認可を経た control だけが行う。
   agent は読み取り専用とし、プロンプトや skill を自分で書き換える tool は持たない。
   tool の実装・利用可能な権限・実行上限はコード側で管理する。

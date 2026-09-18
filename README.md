@@ -51,9 +51,23 @@ PVT の測定時刻は user が設定する。
 - **Docker Compose + Cloudflare Tunnel** —— 自分専用の local dev（Access で本人のみ許可）
 - **Google Cloud（GKE）** —— 提出直前に移行する本番環境
 - **PostgreSQL / Redis** —— 記録の真実と job queue
+- **Cloud Storage** —— 画像保存。browser から署名付き URL へ直接 PUT
 - **Discord** —— 催促の出口（`Notifier` で切ってあり、差し替え可能）
 
-agent 用のプロンプト / skill は PostgreSQL に保存し、管理 UI で微調整できる設計にする。
+agent loop の判断手順・tool 選択・終了条件を含むプロンプト / skill は PostgreSQL に保存し、
+control の管理 UI で編集・微調整できる設計にする。
+Pixel Watch のデータ取り込み・睡眠記録との自動関連付けに向けた schema も用意する（連携は未実装）。
+
+DB の初期定義は [`schema.sql`](schema.sql)。PostgreSQL 16 以上の空の DB に、
+role を作成できる管理者で適用する。
+
+```sh
+psql -v ON_ERROR_STOP=1 -d suyasuya -f schema.sql
+psql -v ON_ERROR_STOP=1 -d suyasuya -f tests/schema.sql
+```
+
+control / agent の role は `NOLOGIN` で作成する。`.env` のパスワードを使った
+ログイン設定は今後の bootstrap で行う。アプリ・Compose は未実装。
 
 ## 設計
 
