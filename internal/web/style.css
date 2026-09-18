@@ -1,0 +1,286 @@
+:root {
+  color-scheme: light;
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+  color: #263d3a;
+  background: #f4f5ef;
+  line-height: 1.7;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+header {
+  padding: 22px max(5vw, 20px);
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  border-bottom: 1px solid #d8ded5;
+  background: #fcfcf7;
+}
+header span {
+  font-size: 0.85rem;
+  color: #63756e;
+}
+.brand {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #294e45;
+  text-decoration: none;
+}
+header button {
+  margin-left: auto;
+}
+main {
+  max-width: 1080px;
+  margin: auto;
+  padding: 24px;
+}
+h1 {
+  font-size: 1.9rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+h2 {
+  font-size: 1.2rem;
+}
+h3 {
+  font-size: 1rem;
+}
+p {
+  color: #61726b;
+}
+nav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+button {
+  border: 0;
+  background: #315e51;
+  color: white;
+  padding: 11px 20px;
+  border-radius: 10px;
+  font: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+button:hover {
+  filter: brightness(1.1);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+nav button,
+.quiet {
+  background: #e5ebe1;
+  color: #29483e;
+}
+nav button[aria-current="true"] {
+  background: #315e51;
+  color: white;
+}
+input,
+select,
+textarea {
+  display: block;
+  width: 100%;
+  padding: 11px;
+  border: 1px solid #c7d2c4;
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  color: inherit;
+}
+textarea {
+  min-height: 240px;
+  font-size: 0.9rem;
+}
+label {
+  display: block;
+  font-size: 0.85rem;
+  margin: 14px 0;
+  color: #486055;
+}
+form button {
+  margin-top: 12px;
+  margin-right: 10px;
+}
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+.card {
+  background: #fffef8;
+  border: 1px solid #dce2d5;
+  border-radius: 18px;
+  padding: 24px;
+  margin-bottom: 20px;
+}
+.narrow {
+  max-width: 440px;
+  margin: 8vh auto;
+}
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.row > * {
+  flex: 1;
+}
+.muted,
+small {
+  color: #65786e;
+  font-size: 0.8rem;
+}
+.tag {
+  display: inline-block;
+  background: #e7eedc;
+  color: #4a6540;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+}
+.record {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid #e5e9de;
+}
+.record:last-child {
+  border: 0;
+}
+.record strong {
+  font-size: 1.1rem;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.actions button {
+  padding: 7px 12px;
+}
+#notice:empty {
+  display: none;
+}
+#notice {
+  position: sticky;
+  top: 8px;
+  background: #fff0cd;
+  border-radius: 10px;
+  padding: 12px;
+  z-index: 10;
+  color: #674e22;
+}
+dialog {
+  border: 1px solid #ccd6c7;
+  border-radius: 20px;
+  max-width: 700px;
+  width: 95%;
+  max-height: 90vh;
+  padding: 26px;
+  background: #fffef8;
+  color: inherit;
+}
+dialog::backdrop {
+  background: #233b3366;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+.photo {
+  max-width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+}
+#pvt-target {
+  height: 280px;
+  width: 100%;
+  font-size: 2rem;
+  background: #e7ece2;
+  color: #405d4d;
+  touch-action: manipulation;
+  user-select: none;
+}
+#pvt-target.ready {
+  background: #315e51;
+  color: white;
+}
+#pvt-clock {
+  font-variant-numeric: tabular-nums;
+  font-size: 2rem;
+}
+.metric {
+  font-size: 2rem;
+  font-weight: 600;
+}
+details {
+  margin: 12px 0;
+}
+summary {
+  cursor: pointer;
+}
+@media (max-width: 650px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  header span {
+    display: none;
+  }
+  main {
+    padding: 16px;
+  }
+  .card {
+    padding: 18px;
+  }
+  .record {
+    flex-wrap: wrap;
+  }
+  h1 {
+    font-size: 1.6rem;
+  }
+  nav button {
+    padding: 10px 14px;
+  }
+}
+
+dialog[open] {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  max-height: 90dvh;
+}
+.dialog-header,
+.dialog-footer {
+  flex-shrink: 0;
+  padding: 12px 20px;
+  background: #fffef8;
+}
+.dialog-header {
+  border-bottom: 1px solid #dce2d5;
+}
+.dialog-footer {
+  border-top: 1px solid #dce2d5;
+}
+#editor-content {
+  overflow: auto;
+  padding: 20px 26px;
+  overscroll-behavior: contain;
+}
+nav {
+  flex-wrap: wrap;
+}

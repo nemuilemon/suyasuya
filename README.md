@@ -40,7 +40,7 @@
 2 つだけ。
 
 - **睡眠記録の確認・承認** —— screenshot の読み取り結果、または主要数値の手入力。昼寝も対象
-- **PVT 3 分**（能動的な入力）—— 日中の機能の計測
+- **PVT 1 分**（能動的な入力）—— 日中の機能の計測
 
 PVT の測定時刻は user が設定する。
 
@@ -84,3 +84,72 @@ control / agent の role は `NOLOGIN` で作成する。`.env` のパスワー�
 
 `data/` 以下は開発用のサンプル。実際の睡眠記録を含むため、
 公開範囲を変えるときは中身を確認すること。
+
+## MVP の起動
+
+`.env.sample` を `.env` にコピーし、DB の3つのパスワード、`APP_PASSWORD`（12文字以上）、
+`GEMINI_API_KEY` と GCS 設定を入れる。初回起動で管理者を作成する。
+
+```sh
+docker compose up --build -d
+```
+
+http://localhost:8080 を開き、`.env` の `APP_USERNAME` / `APP_PASSWORD` でログインする。
+control・worker・PostgreSQL・Redis を起動する。DB/Redis の port はホストへ公開しない。
+既存 Cloudflare Tunnel の転送先は `http://localhost:8080`。
+HTTPS 公開では `APP_SECURE_COOKIE=true` とし、公開 origin を bucket の CORS に追加する。
+
+### Cloud Storage の認証
+
+local では `gcloud auth application-default login` の ADC を使用できる。
+`.env` の `GCP_CREDENTIALS_FILE` に ADC JSON の絶対パスを設定する。
+Compose はこの1ファイルを read-only で mount する。秘密鍵の発行は不要。
+実行ユーザーは `LOCAL_UID` / `LOCAL_GID`（既定 1000）とし、ADC の読み取り権限に合わせる。
+ADC の identity は bucket の object 読み取り権限と、署名用 SA の
+`roles/iam.serviceAccountTokenCreator` が必要。署名用 SA は bucket の作成・読み取り権限が必要。
+`GCS_CORS_ALLOWED_ORIGINS` は構築用の控えであり、アプリが CORS を自動変更することはない。
+
+### 利用できる機能
+
+- 主睡眠・昼寝の手入力、訂正、削除、変更履歴
+- browser から GCS へ署名付き PUT → OCR job → 確認・承認／却下
+- Gemini による OCR、失敗時の再試行と中止、worker 停止後の期限付き job 復旧
+- PVT 1分測定、生データ保存、反応時間の集計、中断記録
+- 測定時刻・就寝時刻・timezone の設定、OCR / agent loop のプロンプト版管理
+
+複雑な agent 判断・Discord 通知・watch 自動取り込みは未実装。
+PVT の設定時刻は画面表示まで。ブラウザーを閉じた状態の通知は行わない。
+OCR は job 作成時の指示の版に固定し、再試行でも同じ版を使う。
+画像内の日付や主睡眠／昼寝が不明な場合は、ユーザーが確認して入力する。
+PVT はブラウザーの timing を用いる簡易測定で、医療機器としての測定ではない。
+
+### 運用と確認
+
+```sh
+go test ./...
+docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < tests/schema.sql
+docker compose logs --tail=50 control worker
+```
+
+`schema.sql` と DB role の password は空の DB の初回起動時だけ適用する。
+既存 DB への変更は migration として適用する。`.env` の変更だけでは既存の
+管理者パスワード・DB role のパスワードは変更されない。
+DB と queue は named volume に永続化する。`docker compose down` で停止できる。
+`down -v` は記録も削除するため、通常は使わない。
+未完了 upload や削除した記録の GCS 原画像は自動削除しない。保持期限の掃除は今後対応する。
+
+## コード構成
+
+- `cmd/control/main.go`：control 用 DB role、service、HTTP server を組み立てる。
+- `cmd/worker/main.go`：agent 用 DB role、Gemini OCR service、queue の処理 loop を組み立てる。
+- `internal/router`：HTTP route と共通 middleware。
+- `internal/handler`：HTTP 入力・認証 cookie・response。SQL は持たない。
+- `internal/service`：承認・記録更新・PVT 集計などの処理。HTTP request/response は持たない。
+- `internal/service/ocr`：Gemini 読み取りと job の実行・結果確定。
+- `internal/repository`：DB 接続、SQL、scan、transaction。ユーザー向け query は user_id で絞る。
+- `internal/worker`：Redis queue の取得・処理 loop。
+- `internal/domain`：入力・結果・エラーの型。
+- `internal/web`：管理画面。`#/record` は入力・OCR 確認、`#/records` は保存済み一覧。
+
+control と worker は別バイナリ・別イメージとしてビルドする。
+worker は router・handler・管理画面を import しない。control は Gemini の SDK を import しない。

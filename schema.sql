@@ -26,6 +26,13 @@ CREATE TABLE users (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE app_sessions (
+    token_hash text PRIMARY KEY,
+    user_id uuid NOT NULL REFERENCES users(id),
+    expires_at timestamptz NOT NULL
+);
+CREATE INDEX app_sessions_expiry ON app_sessions(expires_at);
+
 CREATE TABLE user_settings (
     user_id uuid PRIMARY KEY REFERENCES users(id),
     timezone text NOT NULL DEFAULT 'Asia/Tokyo', -- IANA 名はアプリで検証する
@@ -46,6 +53,7 @@ CREATE TABLE notification_destinations (
 -- 画像本体は非公開の Cloud Storage。browser が V4 signed URL で直接 PUT する。
 -- URL 自体は保存せず、control が確定した object の generation を保存する。
 CREATE TABLE uploads (
+    capture_date date,
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES users(id),
     content_type text NOT NULL CHECK (content_type IN ('image/png', 'image/jpeg', 'image/webp')),
@@ -243,7 +251,7 @@ CREATE TABLE pvt_sessions (
     timezone text NOT NULL,
     device text NOT NULL,
     input_method text NOT NULL,
-    protocol_version text NOT NULL DEFAULT 'pvt-b-v1',
+    protocol_version text NOT NULL DEFAULT 'pvt-1m-v1',
     trials jsonb NOT NULL CHECK (jsonb_typeof(trials) = 'array'),
     -- trial: {stimulus_at_ms, response_at_ms, rt_ms, false_start}。刺激前は stimulus_at_ms=null。
     -- 生データを残し、集計は control が計算する。中断した測定は completed=false。
@@ -294,7 +302,7 @@ CREATE INDEX notifications_user_history ON notifications(user_id, created_at DES
 
 GRANT USAGE ON SCHEMA public TO suyasuya_control, suyasuya_agent;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
-    users, user_settings, notification_destinations, uploads, agent_config_versions,
+    users, app_sessions, user_settings, notification_destinations, uploads, agent_config_versions,
     jobs, job_config_versions, job_results, sleep_records, pvt_sessions,
     job_sleep_records, notifications, watch_devices, watch_sleep_observations, sleep_watch_links TO suyasuya_control;
 

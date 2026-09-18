@@ -36,6 +36,7 @@ vendor/
 # 審査員が repo を読むので出さない。
 docs/schedule.md
 docs/cloud.md
+docs/infra-gcs.md
 
 # --- エディタ / OS -------------------------------------------------------
 .DS_Store

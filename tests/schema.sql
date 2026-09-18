@@ -100,6 +100,7 @@ BEGIN
         OR has_table_privilege('suyasuya_agent', 'agent_config_versions', 'UPDATE')
         OR has_table_privilege('suyasuya_agent', 'notification_destinations', 'SELECT')
         OR has_table_privilege('suyasuya_agent', 'users', 'SELECT')
+        OR has_table_privilege('suyasuya_agent', 'app_sessions', 'SELECT')
         OR has_column_privilege('suyasuya_agent', 'jobs', 'user_id', 'UPDATE')
         OR has_schema_privilege('suyasuya_agent', 'public', 'CREATE') THEN
         RAISE EXCEPTION 'agent の権限が過大';
