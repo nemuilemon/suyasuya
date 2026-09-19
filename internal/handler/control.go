@@ -147,3 +147,15 @@ func (h *Handler) CancelJob(w http.ResponseWriter, r *http.Request, u domain.Use
 	}
 	return reply(w, out)
 }
+
+func (h *Handler) DeleteJobs(w http.ResponseWriter, r *http.Request, u domain.User) error {
+	var in domain.DeleteJobsInput
+	if err := decode(w, r, &in); err != nil {
+		return err
+	}
+	result, err := h.service.DeleteJobs(r.Context(), u, in)
+	if err != nil {
+		return err
+	}
+	return reply(w, result)
+}

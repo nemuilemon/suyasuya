@@ -91,3 +91,9 @@ type LoginInput struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 }
+
+// DeleteJobsInput deletes either selected tasks or all fully reviewed tasks.
+type DeleteJobsInput struct {
+	IDs       []string `json:"ids"`
+	Completed bool     `json:"completed"`
+}

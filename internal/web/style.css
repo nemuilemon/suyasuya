@@ -284,3 +284,31 @@ dialog[open] {
 nav {
   flex-wrap: wrap;
 }
+
+[hidden] {
+  display: none !important;
+}
+.task-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.task-selection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.task-toolbar input[type="checkbox"],
+.record > input[type="checkbox"] {
+  width: auto;
+  flex-shrink: 0;
+}
+.record > input[type="checkbox"] {
+  align-self: flex-start;
+  margin-top: 8px;
+}
+.record .actions {
+  flex-wrap: wrap;
+}

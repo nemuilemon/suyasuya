@@ -5,7 +5,7 @@
     content="width=device-width,initial-scale=1"
   /><title>suyasuya</title
   ><link rel="stylesheet" href="/style.css" />
-  <script src="/app.js" defer></script>
+  <script type="module" src="/app.js"></script>
   <body>
     <header>
       <a href="/" class="brand">☾ suyasuya</a><span>睡眠サポートagent</span
@@ -13,7 +13,9 @@
     </header>
     <main>
       <p id="notice" role="status"></p>
-      <section id="login" class="card narrow">
+      <p id="session-loading" role="status">読み込み中…</p>
+      <button id="retry-session" hidden>再読み込み</button>
+      <section id="login" class="card narrow" hidden>
         <h1>ログイン</h1>
         <form id="login-form">
           <label

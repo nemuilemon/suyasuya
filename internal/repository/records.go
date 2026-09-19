@@ -32,7 +32,7 @@ func (q *Queries) RetireRecord(ctx context.Context, id string, rev int, userID s
 }
 
 func (q *Queries) CandidateOutput(ctx context.Context, jobID string, userID string, dstOutput *[]byte) error {
-	return q.db.QueryRowContext(ctx, `SELECT r.output FROM job_results r JOIN jobs j ON j.id=r.job_id AND j.user_id=r.user_id WHERE j.id=$1 AND j.user_id=$2 AND j.kind='extract_sleep' AND j.status='succeeded' FOR UPDATE OF j`, jobID, userID).Scan(dstOutput)
+	return q.db.QueryRowContext(ctx, `SELECT r.output FROM job_results r JOIN jobs j ON j.id=r.job_id AND j.user_id=r.user_id WHERE j.id=$1 AND j.user_id=$2 AND j.kind='extract_sleep' AND j.status='succeeded' AND j.deleted_at IS NULL FOR UPDATE OF j`, jobID, userID).Scan(dstOutput)
 }
 
 func (q *Queries) CandidateReviewed(ctx context.Context, userID string, jobID string, candidateIndex int, dstAlready *bool) error {

@@ -146,6 +146,7 @@ CREATE TABLE jobs (
     lease_token uuid,
     lease_expires_at timestamptz,
     cancel_requested_at timestamptz,
+    deleted_at timestamptz, -- タスク一覧からの削除。確定記録の出典は保持する。
     invalidated_at timestamptz, -- 参照記録が訂正・削除された評価。control が設定する
     started_at timestamptz,
     finished_at timestamptz,

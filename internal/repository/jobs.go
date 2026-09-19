@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"github.com/lib/pq"
 )
 
 func (q *Queries) RecoverExpiredJobs(ctx context.Context) (sql.Result, error) {
@@ -32,7 +33,7 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) (sql.Result, error)
 }
 
 func (q *Queries) ClaimJob(ctx context.Context, id string, lease string, dstUid *string, dstUpload *string, dstModel *string) error {
-	return q.db.QueryRowContext(ctx, `UPDATE jobs SET status='running',attempts=attempts+1,lease_token=$2,lease_expires_at=now()+interval '3 minutes',started_at=now(),error=NULL WHERE id=$1 AND kind='extract_sleep' AND status='pending' AND available_at<=now() AND cancel_requested_at IS NULL RETURNING user_id,upload_id,model`, id, lease).Scan(dstUid, dstUpload, dstModel)
+	return q.db.QueryRowContext(ctx, `UPDATE jobs SET status='running',attempts=attempts+1,lease_token=$2,lease_expires_at=now()+interval '3 minutes',started_at=now(),error=NULL WHERE id=$1 AND kind='extract_sleep' AND deleted_at IS NULL AND status='pending' AND available_at<=now() AND cancel_requested_at IS NULL RETURNING user_id,upload_id,model`, id, lease).Scan(dstUid, dstUpload, dstModel)
 }
 
 func (q *Queries) JobCancelled(ctx context.Context, id string, uid string, dstRequested *bool) error {
@@ -60,13 +61,34 @@ func (q *Queries) JobPrompt(ctx context.Context, id string, uid string, dstPromp
 }
 
 func (q *Queries) Jobs(ctx context.Context, userID string) ([]json.RawMessage, error) {
-	return jsonRows(ctx, q.db, `SELECT row_to_json(x) FROM (SELECT j.id,j.status,j.error,j.created_at,j.upload_id,u.capture_date,c.version AS prompt_version,r.output,coalesce((SELECT json_agg(source_candidate_index) FROM sleep_records WHERE user_id=j.user_id AND source_job_id=j.id AND revision=1),'[]') AS reviewed FROM jobs j JOIN uploads u ON u.id=j.upload_id AND u.user_id=j.user_id LEFT JOIN job_results r ON r.job_id=j.id AND r.user_id=j.user_id LEFT JOIN job_config_versions v ON v.job_id=j.id AND v.config_key='job.extract_sleep' LEFT JOIN agent_config_versions c ON c.id=v.config_version_id WHERE j.user_id=$1 AND j.kind='extract_sleep' ORDER BY j.created_at DESC LIMIT 50) x`, userID)
+	return jsonRows(ctx, q.db, `SELECT row_to_json(x) FROM (SELECT j.id,j.status,j.error,j.created_at,j.upload_id,u.capture_date,c.version AS prompt_version,r.output,coalesce((SELECT json_agg(source_candidate_index) FROM sleep_records WHERE user_id=j.user_id AND source_job_id=j.id AND revision=1),'[]') AS reviewed FROM jobs j JOIN uploads u ON u.id=j.upload_id AND u.user_id=j.user_id LEFT JOIN job_results r ON r.job_id=j.id AND r.user_id=j.user_id LEFT JOIN job_config_versions v ON v.job_id=j.id AND v.config_key='job.extract_sleep' LEFT JOIN agent_config_versions c ON c.id=v.config_version_id WHERE j.user_id=$1 AND j.kind='extract_sleep' AND j.deleted_at IS NULL ORDER BY j.created_at DESC LIMIT 50) x`, userID)
 }
 
 func (q *Queries) RetryJob(ctx context.Context, id string, userID string) (sql.Result, error) {
-	return q.db.ExecContext(ctx, `UPDATE jobs SET status='pending',attempts=0,finished_at=NULL,cancel_requested_at=NULL,error=NULL,available_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=$1 AND user_id=$2 AND status IN ('failed','cancelled')`, id, userID)
+	return q.db.ExecContext(ctx, `UPDATE jobs SET status='pending',attempts=0,finished_at=NULL,cancel_requested_at=NULL,error=NULL,available_at=now(),lease_token=NULL,lease_expires_at=NULL WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL AND status IN ('failed','cancelled')`, id, userID)
 }
 
 func (q *Queries) CancelJob(ctx context.Context, id string, userID string) (sql.Result, error) {
 	return q.db.ExecContext(ctx, `UPDATE jobs SET cancel_requested_at=now(),status=CASE WHEN status='pending' THEN 'cancelled' ELSE status END,finished_at=CASE WHEN status='pending' THEN now() ELSE finished_at END WHERE id=$1 AND user_id=$2 AND status IN ('pending','running')`, id, userID)
+}
+
+// DeleteJobs retains provenance for approved sleep records. Revoking active leases
+// prevents an in-flight worker from publishing a result after deletion.
+func (q *Queries) DeleteJobs(ctx context.Context, userID string, ids []string, completed bool) (int64, error) {
+	result, err := q.db.ExecContext(ctx, `
+ UPDATE jobs j SET deleted_at=now(),
+  cancel_requested_at=CASE WHEN status IN ('pending','running') THEN now() ELSE cancel_requested_at END,
+  finished_at=CASE WHEN status IN ('pending','running') THEN now() ELSE finished_at END,
+  status=CASE WHEN status IN ('pending','running') THEN 'cancelled' ELSE status END,
+  lease_token=NULL,lease_expires_at=NULL
+ WHERE j.user_id=$1 AND j.kind='extract_sleep' AND j.deleted_at IS NULL
+ AND (j.id=ANY($2::uuid[]) OR ($3 AND j.status='succeeded'
+   AND EXISTS(SELECT 1 FROM job_results r WHERE r.job_id=j.id AND r.user_id=j.user_id
+     AND jsonb_array_length(r.output->'records')>0
+     AND jsonb_array_length(r.output->'records')=(SELECT count(DISTINCT s.source_candidate_index)
+       FROM sleep_records s WHERE s.user_id=j.user_id AND s.source_job_id=j.id))))`, userID, pq.Array(ids), completed)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }

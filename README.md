@@ -153,3 +153,11 @@ DB と queue は named volume に永続化する。`docker compose down` で停�
 
 control と worker は別バイナリ・別イメージとしてビルドする。
 worker は router・handler・管理画面を import しない。control は Gemini の SDK を import しない。
+
+管理画面の JS は ES modules で役割ごとに分ける。`app.js` は初期化、`auth.js` は
+セッション確認、`router.js` は画面遷移、`pages-*.js` は各画面、`record-editor.js` は
+記録フォーム、`api.js` は通信を担当する。ビルド用の JS framework は不要。
+
+タスクの削除は `jobs.deleted_at` による一覧からの削除。承認済みの睡眠記録と出典は保持し、
+未承認の候補は以後承認できない。実行中のタスクは lease を失効させて中止する。
+既存 DB には `docker/40-job-deletion.sql` を適用してから更新する。

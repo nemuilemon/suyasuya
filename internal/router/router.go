@@ -18,6 +18,7 @@ func New(h *handler.Handler) http.Handler {
 	mux.HandleFunc("POST /api/records", h.Protected(h.SaveRecord))
 	mux.HandleFunc("GET /api/records/{id}/history", h.Protected(h.History))
 	mux.HandleFunc("GET /api/jobs", h.Protected(h.Jobs))
+	mux.HandleFunc("DELETE /api/jobs", h.Protected(h.DeleteJobs))
 	mux.HandleFunc("POST /api/jobs/{id}/retry", h.Protected(h.Retry))
 	mux.HandleFunc("POST /api/jobs/{id}/cancel", h.Protected(h.CancelJob))
 	mux.HandleFunc("POST /api/uploads", h.Protected(h.CreateUpload))
