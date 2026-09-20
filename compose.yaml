@@ -72,11 +72,11 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
-  worker:
+  agent:
     build:
       context: .
-      dockerfile: docker/worker.Dockerfile
-    image: suyasuya-worker:local
+      dockerfile: docker/agent.Dockerfile
+    image: suyasuya-agent:local
     restart: unless-stopped
     user: "${LOCAL_UID:-1000}:${LOCAL_GID:-1000}"
     environment:

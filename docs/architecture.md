@@ -185,7 +185,7 @@ list で守っていた頃と違い、**通知の取りこぼしが仕事の消�
 
 table・列への操作権限は Postgres 側で絞る。user ごとの範囲はアプリ側で制限する。
 実際の table・制約・GRANT は [`schema.sql`](../schema.sql) を正本とする。
-以下は権限の概要。worker の claim / 再試行用の列も schema 側で定義する。
+以下は権限の概要。agent の claim / 再試行用の列も schema 側で定義する。
 
 ```sql
 -- agent 専用 role。DDL なし、DELETE なし
@@ -283,7 +283,7 @@ OCR のように原則 1 回の呼び出しで済む job に、不要な tool lo
 ### 原則：LLM に user_id を書かせない
 
 queue が運ぶのは **job_id だけ**。
-worker は Postgres の job から所有者の user_id を取得し、closure に束縛する。
+agent は Postgres の job から所有者の user_id を取得し、closure に束縛する。
 control は job 作成時に認証済み user の ID を保存する。
 tool call の query にはこの値が自動で入り、LLM は user_id に触れない。
 
@@ -335,7 +335,7 @@ record_id や job_id を指定する場合も、user 向け操作では所有者
 INSERT の user_id も束縛した値を使い、LLM や request body の指定を採用しない。
 
 control の記録承認・手入力・設定変更も、認証済み user の範囲で実行する。
-worker の job 取得、scheduler、管理者用設定は内部用の操作として分け、
+agent の job 取得、scheduler、管理者用設定は内部用の操作として分け、
 LLM の tool や通常 user の API に全 user 向けの操作を公開しない。
 
 ## DB は interface で切る
@@ -393,7 +393,7 @@ seam さえ通っていれば、必要になった時に足せる。
 
 常駐。`BLMOVE` で queue を待ち、job を取って処理する。
 
-- worker 数は上限を決める（Gemini の rate limit と費用に直結する）
+- agent 数は上限を決める（Gemini の rate limit と費用に直結する）
 - tool call のループには**反復上限**を置く。
   無限に tool を呼び続ける事故が、そのまま課金になる
 - **SIGTERM で graceful shutdown。** 新規受付を止め、in-flight を流し切る。

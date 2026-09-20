@@ -10,7 +10,7 @@ import (
 
 func (a *Control) enqueue(ctx context.Context, id string) {
 	if ok, e := a.queue.SetNX(ctx, "queued:"+id, "1", 15*time.Second).Result(); e == nil && ok {
-		if e = a.queue.LPush(ctx, "ocr:pending", id).Err(); e != nil {
+		if e = a.queue.LPush(ctx, "tasks:pending", id).Err(); e != nil {
 			a.queue.Del(ctx, "queued:"+id)
 		}
 	}

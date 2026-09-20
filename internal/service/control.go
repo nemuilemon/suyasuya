@@ -9,11 +9,13 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"suyasuya/internal/domain"
+	"suyasuya/internal/notifier"
 	"suyasuya/internal/platform"
 	"suyasuya/internal/repository"
 )
 
 type Control struct {
+	notifier  notifier.Notifier
 	repo      *repository.Store
 	queue     *redis.Client
 	model     string
@@ -21,7 +23,7 @@ type Control struct {
 }
 
 func New(repo *repository.Store, queue *redis.Client) *Control {
-	return &Control{repo: repo, queue: queue, model: platform.Env("GEMINI_MODEL", "gemini-3.8-flash"), maxUpload: platform.Number("UPLOAD_MAX_BYTES", 10485760)}
+	return &Control{notifier: notifier.NewDiscord(), repo: repo, queue: queue, model: platform.Env("GEMINI_MODEL", "gemini-3.8-flash"), maxUpload: platform.Number("UPLOAD_MAX_BYTES", 10485760)}
 }
 func (a *Control) Health(ctx context.Context) error {
 	if err := a.repo.Ping(ctx); err != nil {
@@ -56,7 +58,7 @@ func (a *Control) Seed(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
-	for k, body := range map[string]string{"job.extract_sleep": domain.OCRPrompt, "agent.loop": "承認済みの記録を根拠に判断する。材料が足りなければ保留する。不要な tool 呼び出しはしない。"} {
+	for k, body := range map[string]string{"job.extract_sleep": domain.OCRPrompt, "job.plan_reminder": domain.ReminderPrompt, "agent.loop": "承認済みの記録を根拠に判断する。材料が足りなければ保留する。不要な tool 呼び出しはしない。"} {
 		_, e = tx.EnsurePrompt(ctx, k, body, id)
 		if e != nil {
 			return e

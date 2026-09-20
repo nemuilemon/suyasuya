@@ -8,10 +8,11 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"suyasuya/internal/agent"
 	"suyasuya/internal/platform"
 	"suyasuya/internal/repository"
 	"suyasuya/internal/service/ocr"
-	"suyasuya/internal/worker"
+	"suyasuya/internal/service/reminder"
 )
 
 func main() {
@@ -33,6 +34,13 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	return worker.New(queue, svc).Run(ctx)
+	reminders, e := reminder.New(ctx, repository.New(db))
+	if e != nil {
+		return e
+	}
+	return agent.New(queue, repository.New(db), map[string]agent.Handler{
+		"extract_sleep": svc.Execute,
+		"plan_reminder": reminders.Execute,
+	}).Run(ctx)
 
 }

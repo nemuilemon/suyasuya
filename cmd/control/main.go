@@ -38,6 +38,7 @@ func run() error {
 		return e
 	}
 	go svc.Sweep(ctx)
+	go svc.NotificationsLoop(ctx)
 	server := &http.Server{Addr: ":8080", Handler: router.New(handler.New(svc)), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

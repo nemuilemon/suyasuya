@@ -134,7 +134,7 @@ CREATE UNIQUE INDEX agent_config_one_active ON agent_config_versions(config_key)
 CREATE TABLE jobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES users(id),
-    kind text NOT NULL CHECK (kind IN ('extract_sleep', 'evaluate_sleep', 'plan_reminder')),
+    kind text NOT NULL CHECK (kind ~ '^[a-z][a-z0-9_]{0,63}$'),
     status text NOT NULL DEFAULT 'pending'
         CHECK (status IN ('pending', 'running', 'succeeded', 'failed', 'cancelled')),
     dedup_key text NOT NULL, -- user 内で一意な投入キー。承認版・通知予定などから作る
@@ -162,7 +162,7 @@ CREATE TABLE jobs (
 CREATE INDEX jobs_pending ON jobs(available_at) WHERE status = 'pending';
 CREATE INDEX jobs_expired_lease ON jobs(lease_expires_at) WHERE status = 'running';
 CREATE INDEX jobs_user_history ON jobs(user_id, created_at DESC);
--- worker は条件付き UPDATE で claim。結果確定時も lease_token と中止要求を照合する。
+-- agent は条件付き UPDATE で claim。結果確定時も lease_token と中止要求を照合する。
 
 -- control が実行前に固定する。再試行でも同じ版を使う。
 CREATE TABLE job_config_versions (
@@ -290,6 +290,9 @@ CREATE TABLE notifications (
     scheduled_at timestamptz NOT NULL,
     status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sending', 'sent', 'failed', 'cancelled')),
     sent_at timestamptz,
+    expires_at timestamptz NOT NULL,
+    sending_started_at timestamptz,
+    discord_message_id text,
     attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
     error text,
     created_at timestamptz NOT NULL DEFAULT now(),

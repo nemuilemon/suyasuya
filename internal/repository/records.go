@@ -48,7 +48,7 @@ func (q *Queries) InvalidateEvaluations(ctx context.Context, userID string, id s
 }
 
 func (q *Queries) Settings(ctx context.Context, userID string, dstB *[]byte) error {
-	return q.db.QueryRowContext(ctx, `SELECT row_to_json(s) FROM user_settings s WHERE user_id=$1`, userID).Scan(dstB)
+	return q.db.QueryRowContext(ctx, `SELECT to_jsonb(s) || jsonb_build_object('webhook_configured',EXISTS(SELECT 1 FROM notification_destinations d WHERE d.user_id=s.user_id)) FROM user_settings s WHERE user_id=$1`, userID).Scan(dstB)
 }
 
 func (q *Queries) SaveSettings(ctx context.Context, userID string, timezone string, pvt string, bedtime string) (sql.Result, error) {

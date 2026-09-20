@@ -5,14 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"github.com/lib/pq"
+	"suyasuya/internal/domain"
 )
 
 func (q *Queries) RecoverExpiredJobs(ctx context.Context) (sql.Result, error) {
-	return q.db.ExecContext(ctx, `UPDATE jobs SET status=CASE WHEN cancel_requested_at IS NOT NULL THEN 'cancelled' WHEN attempts>=3 THEN 'failed' ELSE 'pending' END,finished_at=CASE WHEN cancel_requested_at IS NOT NULL OR attempts>=3 THEN now() ELSE NULL END,lease_token=NULL,lease_expires_at=NULL WHERE kind='extract_sleep' AND status='running' AND lease_expires_at<now()`)
+	return q.db.ExecContext(ctx, `UPDATE jobs SET status=CASE WHEN cancel_requested_at IS NOT NULL THEN 'cancelled' WHEN attempts>=3 THEN 'failed' ELSE 'pending' END,finished_at=CASE WHEN cancel_requested_at IS NOT NULL OR attempts>=3 THEN now() ELSE NULL END,lease_token=NULL,lease_expires_at=NULL WHERE status='running' AND lease_expires_at<now()`)
 }
 
 func (q *Queries) PendingJobs(ctx context.Context) ([]string, error) {
-	rows, e := q.db.QueryContext(ctx, `SELECT id FROM jobs WHERE kind='extract_sleep' AND status='pending' AND available_at<=now() AND cancel_requested_at IS NULL LIMIT 100`)
+	rows, e := q.db.QueryContext(ctx, `SELECT id FROM jobs WHERE deleted_at IS NULL AND status='pending' AND available_at<=now() AND cancel_requested_at IS NULL LIMIT 100`)
 	if e != nil {
 		return nil, e
 	}
@@ -32,8 +33,8 @@ func (q *Queries) DeleteExpiredSessions(ctx context.Context) (sql.Result, error)
 	return q.db.ExecContext(ctx, `DELETE FROM app_sessions WHERE expires_at<now()`)
 }
 
-func (q *Queries) ClaimJob(ctx context.Context, id string, lease string, dstUid *string, dstUpload *string, dstModel *string) error {
-	return q.db.QueryRowContext(ctx, `UPDATE jobs SET status='running',attempts=attempts+1,lease_token=$2,lease_expires_at=now()+interval '3 minutes',started_at=now(),error=NULL WHERE id=$1 AND kind='extract_sleep' AND deleted_at IS NULL AND status='pending' AND available_at<=now() AND cancel_requested_at IS NULL RETURNING user_id,upload_id,model`, id, lease).Scan(dstUid, dstUpload, dstModel)
+func (q *Queries) ClaimTask(ctx context.Context, id, lease string, task *domain.Task) error {
+	return q.db.QueryRowContext(ctx, `UPDATE jobs SET status='running',attempts=attempts+1,lease_token=$2,lease_expires_at=now()+interval '3 minutes',started_at=now(),error=NULL WHERE id=$1 AND deleted_at IS NULL AND status='pending' AND available_at<=now() AND cancel_requested_at IS NULL RETURNING user_id,kind,coalesce(upload_id::text,''),model,input`, id, lease).Scan(&task.UserID, &task.Kind, &task.UploadID, &task.Model, &task.Input)
 }
 
 func (q *Queries) JobCancelled(ctx context.Context, id string, uid string, dstRequested *bool) error {
@@ -73,7 +74,7 @@ func (q *Queries) CancelJob(ctx context.Context, id string, userID string) (sql.
 }
 
 // DeleteJobs retains provenance for approved sleep records. Revoking active leases
-// prevents an in-flight worker from publishing a result after deletion.
+// prevents an in-flight agent from publishing a result after deletion.
 func (q *Queries) DeleteJobs(ctx context.Context, userID string, ids []string, completed bool) (int64, error) {
 	result, err := q.db.ExecContext(ctx, `
  UPDATE jobs j SET deleted_at=now(),

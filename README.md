@@ -95,7 +95,7 @@ docker compose up --build -d
 ```
 
 http://localhost:8080 を開き、`.env` の `APP_USERNAME` / `APP_PASSWORD` でログインする。
-control・worker・PostgreSQL・Redis を起動する。DB/Redis の port はホストへ公開しない。
+control・agent・PostgreSQL・Redis を起動する。DB/Redis の port はホストへ公開しない。
 既存 Cloudflare Tunnel の転送先は `http://localhost:8080`。
 HTTPS 公開では `APP_SECURE_COOKIE=true` とし、公開 origin を bucket の CORS に追加する。
 
@@ -113,12 +113,11 @@ ADC の identity は bucket の object 読み取り権限と、署名用 SA の
 
 - 主睡眠・昼寝の手入力、訂正、削除、変更履歴
 - browser から GCS へ署名付き PUT → OCR job → 確認・承認／却下
-- Gemini による OCR、失敗時の再試行と中止、worker 停止後の期限付き job 復旧
+- Gemini による OCR、失敗時の再試行と中止、agent 停止後の期限付き job 復旧
 - PVT 1分測定、生データ保存、反応時間の集計、中断記録
 - 測定時刻・就寝時刻・timezone の設定、OCR / agent loop のプロンプト版管理
 
-複雑な agent 判断・Discord 通知・watch 自動取り込みは未実装。
-PVT の設定時刻は画面表示まで。ブラウザーを閉じた状態の通知は行わない。
+Discord に就寝・PVT の通知を送る。複雑な agent 判断・watch 自動取り込みは未実装。
 OCR は job 作成時の指示の版に固定し、再試行でも同じ版を使う。
 画像内の日付や主睡眠／昼寝が不明な場合は、ユーザーが確認して入力する。
 PVT はブラウザーの timing を用いる簡易測定で、医療機器としての測定ではない。
@@ -128,7 +127,7 @@ PVT はブラウザーの timing を用いる簡易測定で、医療機器と�
 ```sh
 go test ./...
 docker compose exec -T postgres sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < tests/schema.sql
-docker compose logs --tail=50 control worker
+docker compose logs --tail=50 control agent
 ```
 
 `schema.sql` と DB role の password は空の DB の初回起動時だけ適用する。
@@ -141,18 +140,20 @@ DB と queue は named volume に永続化する。`docker compose down` で停�
 ## コード構成
 
 - `cmd/control/main.go`：control 用 DB role、service、HTTP server を組み立てる。
-- `cmd/worker/main.go`：agent 用 DB role、Gemini OCR service、queue の処理 loop を組み立てる。
+- `cmd/agent/main.go`：agent 用 DB role、Gemini OCR / 催促 service、queue の処理 loop を組み立てる。
 - `internal/router`：HTTP route と共通 middleware。
 - `internal/handler`：HTTP 入力・認証 cookie・response。SQL は持たない。
 - `internal/service`：承認・記録更新・PVT 集計などの処理。HTTP request/response は持たない。
-- `internal/service/ocr`：Gemini 読み取りと job の実行・結果確定。
+- `internal/service/ocr`：Gemini による画像の読み取り。
 - `internal/repository`：DB 接続、SQL、scan、transaction。ユーザー向け query は user_id で絞る。
-- `internal/worker`：Redis queue の取得・処理 loop。
+- `internal/agent`：Redis queue の取得、lease・中止・結果確定を共通管理。
+- `internal/service/reminder`：Gemini による催促文面の生成。
+- `internal/notifier`：Discord 配信と送信確認。
 - `internal/domain`：入力・結果・エラーの型。
 - `internal/web`：管理画面。`#/record` は入力・OCR 確認、`#/records` は保存済み一覧。
 
-control と worker は別バイナリ・別イメージとしてビルドする。
-worker は router・handler・管理画面を import しない。control は Gemini の SDK を import しない。
+control と agent は別バイナリ・別イメージとしてビルドする。
+agent は router・handler・管理画面を import しない。control は Gemini の SDK を import しない。
 
 管理画面の JS は ES modules で役割ごとに分ける。`app.js` は初期化、`auth.js` は
 セッション確認、`router.js` は画面遷移、`pages-*.js` は各画面、`record-editor.js` は
@@ -161,3 +162,39 @@ worker は router・handler・管理画面を import しない。control は Gem
 タスクの削除は `jobs.deleted_at` による一覧からの削除。承認済みの睡眠記録と出典は保持し、
 未承認の候補は以後承認できない。実行中のタスクは lease を失効させて中止する。
 既存 DB には `docker/40-job-deletion.sql` を適用してから更新する。
+
+agent はタスク種別と handler の対応を `cmd/agent/main.go` で登録する。
+取得・lease・中止・結果保存は `internal/agent` が共通で扱い、handler は
+`domain.Task`（所有者・種別・JSON input 等）から JSON の結果を返す。
+現在の登録は `extract_sleep` と `plan_reminder`。未登録の種別は失敗として保存する。
+タスク追加時は handler と投入元を追加する。画面の画像承認は OCR 専用。
+
+設定画面で Discord Webhook URL を保存・変更・削除できる。
+URL は control 専用の `notification_destinations` に保存し、API には設定有無だけを返す。
+Webhook 保存だけでは送信しない。「自動通知」を有効にすると設定時刻に送信する。
+「接続テストを送信」は自動通知の ON/OFF にかかわらず1回送信する（1分に1回まで）。
+
+既存 DB には `docker/50-agent-tasks.sql` を適用する。
+旧 worker を停止して agent に切り替える。旧 Redis queue に残った pending job は
+PostgreSQL から新しい `tasks:pending` に再投入され、実行中 job は lease 期限後に復旧する。
+
+## 自動通知
+
+- control が5秒ごとにユーザーの timezone と設定時刻を確認。就寝・PVT を各1日1回、PostgreSQL の一意キーで重複防止する。
+- `plan_reminder` は作成時の `agent.loop` / `job.plan_reminder` の版を固定。管理画面で文面の指示を調整できる。
+- agent は Gemini で短い催促文を生成する。60秒で生成できない場合や不正な出力は定型文に切り替える。
+- 現在の判断材料は設定時刻。睡眠傾向・PVT 結果から強度を学習する処理は未実装。
+- control が結果を通知テーブルに移し、送信直前に ON/OFF・時刻・timezone・送信先を再確認する。agent は webhook URL を読めない。
+- 再起動後は予定時刻から15分未満のみ追いつき送信。古い催促をまとめて送らない。停止した日の同じ通知は再有効化しても重ねて送らない。
+- Discord の受領 ID を保存し、メンションを無効化する。429 は指定時間を待って最大3回まで送信を試みる。
+- 通信切断・5xx・プロセス停止など結果が不明な送信は自動再送しない。履歴に失敗として残す。外部送信の exactly-once は保証しない。
+- 設定画面で自動通知の停止・接続テスト・履歴確認ができる。送信中に停止した場合、その1件は取り消せない。
+
+既存 DB には起動前に `docker/60-notification-delivery.sql` を適用する。
+通知の DB 統合テストは `schema.sql` を適用した使い捨て DB を指定し、
+`REMINDER_TEST_DB=<DB名>` と PostgreSQL 管理者の `POSTGRES_USER` / `POSTGRES_PASSWORD`
+を渡して `go test ./internal/repository -run TestReminderDeliveryIntegration` を実行する
+（DB は localhost:5432）。通常の `go test ./...` ではこの統合テストを skip する。
+
+Discord の仕様：[Webhook execution](https://docs.discord.com/developers/resources/webhook#execute-webhook)、
+[Rate limits](https://docs.discord.com/developers/topics/rate-limits)。

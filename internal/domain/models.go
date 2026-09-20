@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"time"
 )
 
@@ -71,9 +72,12 @@ type OCRResult struct {
 }
 
 type SettingsInput struct {
-	Timezone string `json:"timezone"`
-	PVT      string `json:"pvt_reminder_time"`
-	Bedtime  string `json:"target_bedtime"`
+	NotificationsEnabled *bool   `json:"notifications_enabled"`
+	Webhook              *string `json:"discord_webhook_url"`
+	ClearWebhook         bool    `json:"clear_webhook"`
+	Timezone             string  `json:"timezone"`
+	PVT                  string  `json:"pvt_reminder_time"`
+	Bedtime              string  `json:"target_bedtime"`
 }
 
 type PromptInput struct {
@@ -96,4 +100,10 @@ type LoginInput struct {
 type DeleteJobsInput struct {
 	IDs       []string `json:"ids"`
 	Completed bool     `json:"completed"`
+}
+
+// Task carries the owner and input claimed from PostgreSQL, never from the queue.
+type Task struct {
+	ID, UserID, Kind, UploadID, Model string
+	Input                             json.RawMessage
 }

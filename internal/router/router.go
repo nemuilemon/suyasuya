@@ -24,6 +24,8 @@ func New(h *handler.Handler) http.Handler {
 	mux.HandleFunc("POST /api/uploads", h.Protected(h.CreateUpload))
 	mux.HandleFunc("POST /api/uploads/{id}/complete", h.Protected(h.CompleteUpload))
 	mux.HandleFunc("GET /api/uploads/{id}/view", h.Protected(h.ViewUpload))
+	mux.HandleFunc("GET /api/notifications", h.Protected(h.Notifications))
+	mux.HandleFunc("POST /api/notifications/test", h.Protected(h.TestNotification))
 	mux.HandleFunc("GET /api/settings", h.Protected(h.Settings))
 	mux.HandleFunc("PUT /api/settings", h.Protected(h.SaveSettings))
 	mux.HandleFunc("GET /api/pvt", h.Protected(h.PVTList))

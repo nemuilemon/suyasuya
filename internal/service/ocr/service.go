@@ -2,12 +2,9 @@ package ocr
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -81,66 +78,10 @@ func validateOCR(out *domain.OCRResult) error {
 	}
 	return nil
 }
-func (a *Service) Process(parent context.Context, id string) {
-	lease := platform.UUID()
-	var uid, upload, model string
-	e := a.repo.ClaimJob(parent, id, lease, &uid, &upload, &model)
-	if errors.Is(e, sql.ErrNoRows) {
-		return
-	}
-	if e != nil {
-		log.Printf("claim %s: %s", id, platform.SafeError(e))
-		return
-	}
-	ctx, cancel := context.WithTimeout(parent, 120*time.Second)
-	defer cancel()
-	// 定期確認で control からの中止を拾う。保存済み状態は最後にも照合する。
-	go func() {
-		t := time.NewTicker(time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				var requested bool
-				if a.repo.JobCancelled(ctx, id, uid, &requested) == nil && requested {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
-	output, e := a.extract(ctx, uid, upload, id, model)
-	cleanup, cancelCleanup := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancelCleanup()
-	if e != nil {
-		log.Printf("OCR %s: %s", id, platform.SafeError(e))
-		a.repo.FailJob(cleanup, id, uid, lease, "画像の読み取りに失敗しました。設定や画像を確認して再試行してください。")
-		return
-	}
-	tx, e := a.repo.Begin(cleanup)
-	if e != nil {
-		return
-	}
-	defer tx.Rollback()
-	result, e := tx.CompleteJob(cleanup, id, uid, lease)
-	if e != nil {
-		return
-	}
-	n, _ := result.RowsAffected()
-	if n == 0 {
-		tx.Rollback()
-		a.repo.CancelClaim(cleanup, id, uid, lease)
-		return
-	}
-	_, e = tx.InsertResult(cleanup, id, uid, string(output))
-	if e != nil {
-		return
-	}
-	if e = tx.Commit(); e != nil {
-		log.Printf("complete %s: %s", id, platform.SafeError(e))
-	}
+
+// Execute reads an image and returns a validated result; the agent owns job lifecycle.
+func (a *Service) Execute(ctx context.Context, job domain.Task) ([]byte, error) {
+	return a.extract(ctx, job.UserID, job.UploadID, job.ID, job.Model)
 }
 func (a *Service) extract(ctx context.Context, uid, upload, id, model string) ([]byte, error) {
 	data, mime, e := a.readImage(ctx, uid, upload)
