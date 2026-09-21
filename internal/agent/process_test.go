@@ -8,9 +8,9 @@ import (
 )
 
 func TestDispatchTask(t *testing.T) {
-	task := domain.Task{ID: "job", UserID: "owner", Kind: "custom_task", Input: json.RawMessage(`{"value":1}`)}
+	task := domain.Task{ID: "job", UserID: "owner", Kind: "custom_task", BasePrompt: "shared base", Input: json.RawMessage(`{"value":1}`)}
 	runner := &Runner{handlers: map[string]Handler{"custom_task": func(ctx context.Context, got domain.Task) ([]byte, error) {
-		if got.UserID != task.UserID || string(got.Input) != string(task.Input) {
+		if got.BasePrompt != "shared base" || got.Instructions("specific") != "shared base\n\nspecific" || got.UserID != task.UserID || string(got.Input) != string(task.Input) {
 			t.Fatal("task context lost")
 		}
 		return []byte(`{"ok":true}`), nil

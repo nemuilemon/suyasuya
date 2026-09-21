@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"strings"
 	"suyasuya/internal/domain"
 	"suyasuya/internal/platform"
 	"time"
+	"unicode/utf8"
 )
 
 func (a *Control) Notifications(ctx context.Context, u domain.User) (any, error) {
@@ -54,6 +57,12 @@ func (a *Control) processNotifications(ctx context.Context) error {
 	if err := a.scheduleReminders(ctx); err != nil {
 		return err
 	}
+	if err := a.scheduleWeekly(ctx); err != nil {
+		return err
+	}
+	if err := a.collectWeekly(ctx); err != nil {
+		return err
+	}
 	plans, err := a.repo.PlannedReminders(ctx)
 	if err != nil {
 		return err
@@ -61,8 +70,17 @@ func (a *Control) processNotifications(ctx context.Context) error {
 	for _, p := range plans {
 		var in domain.ReminderInput
 		var out domain.ReminderResult
-		if json.Unmarshal(p.Input, &in) != nil || json.Unmarshal(p.Output, &out) != nil || !domain.ValidReminderBody(out.Body) || (in.Kind != "bedtime" && in.Kind != "pvt") {
+		if json.Unmarshal(p.Input, &in) != nil || json.Unmarshal(p.Output, &out) != nil || (in.Kind != "bedtime" && in.Kind != "pvt") {
 			continue
+		}
+		if out.Send != nil && !*out.Send {
+			if err = a.repo.SuppressNotification(ctx, p, in.Kind, in.DueAt, out.Body, out.Reason); err != nil {
+				return err
+			}
+			continue
+		}
+		if strings.TrimSpace(out.Body) == "" || utf8.RuneCountInString(out.Body) > 1500 {
+			return fmt.Errorf("invalid agent message")
 		}
 		if err = a.repo.CreateReminderNotification(ctx, p, in, out.Body); err != nil {
 			return err
@@ -79,7 +97,7 @@ func (a *Control) processNotifications(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		result := a.notifier.Send(ctx, delivery.Webhook, delivery.Body)
+		result := a.notifier.Send(ctx, delivery.Webhook, delivery.Body, delivery.AgentName)
 		status := "failed"
 		if result.MessageID != "" {
 			status = "sent"

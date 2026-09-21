@@ -72,6 +72,10 @@ type OCRResult struct {
 }
 
 type SettingsInput struct {
+	AgentName            *string `json:"agent_name"`
+	WeeklyEnabled        *bool   `json:"weekly_report_enabled"`
+	WeeklyWeekday        *int    `json:"weekly_report_weekday"`
+	WeeklyTime           *string `json:"weekly_report_time"`
 	NotificationsEnabled *bool   `json:"notifications_enabled"`
 	Webhook              *string `json:"discord_webhook_url"`
 	ClearWebhook         bool    `json:"clear_webhook"`
@@ -105,5 +109,9 @@ type DeleteJobsInput struct {
 // Task carries the owner and input claimed from PostgreSQL, never from the queue.
 type Task struct {
 	ID, UserID, Kind, UploadID, Model string
+	BasePrompt                        string
 	Input                             json.RawMessage
 }
+
+// Instructions places the shared base before the task-specific instructions.
+func (t Task) Instructions(specific string) string { return t.BasePrompt + "\n\n" + specific }

@@ -22,7 +22,7 @@ func (q *Queries) EnsureSettings(ctx context.Context, id string) (sql.Result, er
 }
 
 func (q *Queries) EnsurePrompt(ctx context.Context, k string, body string, id string) (sql.Result, error) {
-	return q.db.ExecContext(ctx, `INSERT INTO agent_config_versions(config_key,kind,version,body,is_active,created_by) SELECT $1,'prompt',1,$2,true,$3 WHERE NOT EXISTS(SELECT 1 FROM agent_config_versions WHERE config_key=$1)`, k, body, id)
+	return q.db.ExecContext(ctx, `INSERT INTO agent_config_versions(config_key,kind,version,body,is_active,created_by) SELECT $1,'prompt',1,$2,true,$3 WHERE NOT EXISTS(SELECT 1 FROM agent_config_versions WHERE config_key=$1 AND user_id=$3)`, k, body, id)
 }
 
 func (q *Queries) LoginCredentials(ctx context.Context, username string, dstID *string, dstHash *string) error {
@@ -35,4 +35,25 @@ func (q *Queries) CreateSession(ctx context.Context, tokenHash string, id string
 
 func (q *Queries) DeleteSession(ctx context.Context, tokenHash string, userID string) (sql.Result, error) {
 	return q.db.ExecContext(ctx, `DELETE FROM app_sessions WHERE token_hash=$1 AND user_id=$2`, tokenHash, userID)
+}
+
+func (q *Queries) AllUserIDs(ctx context.Context) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, `SELECT id FROM users`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+func (q *Queries) SetAgentName(ctx context.Context, id, name string) error {
+	_, err := q.db.ExecContext(ctx, `UPDATE user_settings SET agent_name=$2 WHERE user_id=$1`, id, name)
+	return err
 }

@@ -30,7 +30,7 @@
 | **学習** | 効いていない打ち方をやめ、効く打ち方に寄せる |
 | **根拠** | PVT（反応時間）で、主観だけでは気づきにくい日中の機能の変化を捉える |
 
-催促は**「ありす」の声**で送る。正しさだけで押すと、人は通知を mute する。
+agent の人格は各ユーザーの base prompt で定義する。「ありす」は nemuilemon の agent であり、全員共通の人格ではない。
 
 スコアを毎朝突きつけて習慣化を迫る形は取らない。
 **agent が読んで、必要なときにだけ声をかける。**
@@ -147,7 +147,7 @@ DB と queue は named volume に永続化する。`docker compose down` で停�
 - `internal/service/ocr`：Gemini による画像の読み取り。
 - `internal/repository`：DB 接続、SQL、scan、transaction。ユーザー向け query は user_id で絞る。
 - `internal/agent`：Redis queue の取得、lease・中止・結果確定を共通管理。
-- `internal/service/reminder`：Gemini による催促文面の生成。
+- `internal/agent`：目的に基づく判断、tool 呼び出し、モデルとの対話ループ。OCR は専用 service を維持する。
 - `internal/notifier`：Discord 配信と送信確認。
 - `internal/domain`：入力・結果・エラーの型。
 - `internal/web`：管理画面。`#/record` は入力・OCR 確認、`#/records` は保存済み一覧。
@@ -182,8 +182,8 @@ PostgreSQL から新しい `tasks:pending` に再投入され、実行中 job �
 
 - control が5秒ごとにユーザーの timezone と設定時刻を確認。就寝・PVT を各1日1回、PostgreSQL の一意キーで重複防止する。
 - `plan_reminder` は作成時の `agent.loop` / `job.plan_reminder` の版を固定。管理画面で文面の指示を調整できる。
-- agent は Gemini で短い催促文を生成する。60秒で生成できない場合や不正な出力は定型文に切り替える。
-- 現在の判断材料は設定時刻。睡眠傾向・PVT 結果から強度を学習する処理は未実装。
+- agent は目的とユーザーの base prompt に沿って tool を選び、送信の要否・本文・理由を返す。生成失敗時は定型文を送らず task の失敗として残す。
+- 起動条件は設定時刻。agent は tool で承認済み睡眠記録・PVT・設定・通知履歴を参照できる。介入効果を学習する処理は未実装。
 - control が結果を通知テーブルに移し、送信直前に ON/OFF・時刻・timezone・送信先を再確認する。agent は webhook URL を読めない。
 - 再起動後は予定時刻から15分未満のみ追いつき送信。古い催促をまとめて送らない。停止した日の同じ通知は再有効化しても重ねて送らない。
 - Discord の受領 ID を保存し、メンションを無効化する。429 は指定時間を待って最大3回まで送信を試みる。
@@ -198,3 +198,57 @@ PostgreSQL から新しい `tasks:pending` に再投入され、実行中 job �
 
 Discord の仕様：[Webhook execution](https://docs.discord.com/developers/resources/webhook#execute-webhook)、
 [Rate limits](https://docs.discord.com/developers/topics/rate-limits)。
+
+## 睡眠のふりかえり・週間レポート
+
+「ふりかえり」で期間を指定し、睡眠時間（主睡眠・昼寝）と就寝時刻のチャートを確認できる。
+集計対象は現在の承認済み記録。未記録や時間不明をゼロとして扱わず、平均主睡眠は
+主睡眠の時間がすべて分かる日だけで計算する。同日の主睡眠が複数ある場合は時間を合算し、
+最初の開始時刻を就寝時刻とする。日付は睡眠記録の日付（主睡眠は起床日）。
+就寝時刻の表示・平均はユーザーの timezone で正午を日付境界として計算する。
+
+週間レポートは `weekly_report` task。control が承認済み記録と集計の snapshot を入力に保存し、
+agent が目的に沿って対象週の snapshot を tool で取得し、レポート内容を判断する。生成に失敗しても集計 snapshot は残る。
+元の記録を編集・削除すると、未送信レポートの配信を止め、画面に更新が必要なことを表示する。
+
+- 手動：対象週（月〜日）を選んで生成。既定では画面のみ。「Discord にも送る」を選ぶと送信する。
+- 自動：設定の「自動通知」と「週1回、睡眠のまとめ」を有効にする。既定は月曜09:00、前週の月〜日を送る。
+- 曜日・時刻・timezone は設定可能。同じ対象週は自動で1回だけ。停止後24時間未満なら追いつき送信する。
+- 手動生成は途中の週にも対応。生成時点より先の日付の記録は含めない。
+- 週次レポートの指示は設定の `job.weekly_report` で版管理する。
+
+既存 DB には `docker/70-weekly-reports.sql` を適用する。
+
+## Agent 共通の指示
+
+設定の「Agent 共通の指示」（保存キー `agent.loop`）を全 agent task のベースとする。
+`jobs` 作成時の DB trigger が有効な版を `job_config_versions` に固定し、agent の共通処理が
+`Task.BasePrompt` に読み込む。OCR は `Task.Instructions(専用指示)` で画像抽出の指示と組み合わせる。
+催促・週次レポートは共通指示を system に置き、タスクの目的・前提と利用可能な tool を渡す。
+新しい handler も共通指示を引き継ぐ。
+再試行は元の版を使う。共通指示が取得できないタスクは、指示なしでは実行せず失敗として残す。
+既存 DB には control / agent を停止して `docker/80-task-base-prompt.sql` を適用する。
+成功済みタスクの履歴は書き換えず、それ以外の未束縛タスクには移行時の共通指示を紐づける。
+
+## 目的・tool・ユーザーごとの人格
+
+`internal/agent` に `Reasoner`、tool registry、Gemini function-call loop を集約する。
+OCR は従来の画像抽出のまま。催促と週間レポートには目的・前提・許可した tool 名を渡し、
+どう催促するか、褒めるか、送らないかは agent が判断する。送信を見送る場合も理由を保存する。
+外部送信・時刻スケジュール・HTTP は control、SQL は repository の責務とする。
+
+- `getSleepTime`：本人の承認済み主睡眠・昼寝・日別集計。週次 task では入力 snapshot を使う。
+- `getPVTResults`：本人の測定結果と protocol、完了状態。
+- `getUserSettings`：表示名・timezone・目標時刻・通知設定・現地日付。
+- `getNotificationHistory`：本人の直近20件の通知。相手からの返信を受信する機能ではない。
+
+tool の user ID は task の所有者を closure に固定し、モデルには指定させない。
+最大4回のtool対話・実tool呼び出し8回。最後に構造化した判断を生成する。
+DB資格情報・webhook URL を tool に出さず、送信・書き込み tool は提供しない。
+Gemini の function call ID と thought signature を保った履歴を返す。
+参考：[Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling)。
+
+プロンプトは `user_id` ごとに版管理し、一般ユーザーも自分の base / 目的を編集できる。
+表示名も設定で変更でき、空欄では Discord Webhook 自体の名前を使う。共有コードに人格を固定しない。
+`docker/90-agent-goals.sql` は未編集の既定プロンプトだけを目的中心の新版にする。
+`docker/91-personal-agents.sql` は既存プロンプトを作成者の所有へ移行する。base 本文は保持する。

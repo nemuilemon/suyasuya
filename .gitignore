@@ -37,6 +37,7 @@ vendor/
 docs/schedule.md
 docs/cloud.md
 docs/infra-gcs.md
+docs/log/
 
 # --- エディタ / OS -------------------------------------------------------
 .DS_Store

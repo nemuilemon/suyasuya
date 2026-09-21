@@ -30,6 +30,9 @@ func (a *Control) Login(ctx context.Context, in domain.LoginInput) (string, erro
 	if e != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.Password)) != nil {
 		return "", domain.Error{Code: 401, Message: "ユーザー名またはパスワードが違います"}
 	}
+	if e = a.EnsurePersonalAgent(ctx, id); e != nil {
+		return "", e
+	}
 	t := platform.Token()
 	_, e = a.repo.CreateSession(ctx, platform.Digest(t), id)
 	if e != nil {

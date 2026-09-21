@@ -55,18 +55,18 @@ func (q *Queries) SaveSettings(ctx context.Context, userID string, timezone stri
 	return q.db.ExecContext(ctx, `UPDATE user_settings SET timezone=$2,pvt_reminder_time=NULLIF($3,'')::time,target_bedtime=NULLIF($4,'')::time,updated_at=now() WHERE user_id=$1`, userID, timezone, pvt, bedtime)
 }
 
-func (q *Queries) Prompts(ctx context.Context) ([]json.RawMessage, error) {
-	return jsonRows(ctx, q.db, `SELECT row_to_json(c) FROM (SELECT * FROM agent_config_versions ORDER BY config_key,version DESC) c`)
+func (q *Queries) Prompts(ctx context.Context, userID string) ([]json.RawMessage, error) {
+	return jsonRows(ctx, q.db, `SELECT row_to_json(c) FROM (SELECT * FROM agent_config_versions WHERE user_id=$1 ORDER BY config_key,version DESC) c`, userID)
 }
 
-func (q *Queries) LockPrompt(ctx context.Context, key string) (sql.Result, error) {
-	return q.db.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, key)
+func (q *Queries) LockPrompt(ctx context.Context, key, userID string) (sql.Result, error) {
+	return q.db.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, userID+":"+key)
 }
 
-func (q *Queries) RetirePrompt(ctx context.Context, key string) (sql.Result, error) {
-	return q.db.ExecContext(ctx, `UPDATE agent_config_versions SET is_active=false WHERE config_key=$1 AND is_active`, key)
+func (q *Queries) RetirePrompt(ctx context.Context, key, userID string) (sql.Result, error) {
+	return q.db.ExecContext(ctx, `UPDATE agent_config_versions SET is_active=false WHERE config_key=$1 AND user_id=$2 AND is_active`, key, userID)
 }
 
 func (q *Queries) InsertPrompt(ctx context.Context, key string, body string, userID string) (sql.Result, error) {
-	return q.db.ExecContext(ctx, `INSERT INTO agent_config_versions(config_key,kind,version,body,is_active,created_by) SELECT $1,'prompt',coalesce(max(version),0)+1,$2,true,$3 FROM agent_config_versions WHERE config_key=$1`, key, body, userID)
+	return q.db.ExecContext(ctx, `INSERT INTO agent_config_versions(config_key,kind,version,body,is_active,created_by) SELECT $1,'prompt',coalesce(max(version),0)+1,$2,true,$3 FROM agent_config_versions WHERE config_key=$1 AND user_id=$3`, key, body, userID)
 }

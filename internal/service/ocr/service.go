@@ -81,9 +81,9 @@ func validateOCR(out *domain.OCRResult) error {
 
 // Execute reads an image and returns a validated result; the agent owns job lifecycle.
 func (a *Service) Execute(ctx context.Context, job domain.Task) ([]byte, error) {
-	return a.extract(ctx, job.UserID, job.UploadID, job.ID, job.Model)
+	return a.extract(ctx, job.UserID, job.UploadID, job.ID, job.Model, job.BasePrompt)
 }
-func (a *Service) extract(ctx context.Context, uid, upload, id, model string) ([]byte, error) {
+func (a *Service) extract(ctx context.Context, uid, upload, id, model, basePrompt string) ([]byte, error) {
 	data, mime, e := a.readImage(ctx, uid, upload)
 	if e != nil {
 		return nil, e
@@ -93,7 +93,7 @@ func (a *Service) extract(ctx context.Context, uid, upload, id, model string) ([
 	if e != nil {
 		return nil, e
 	}
-	response, e := a.client.Models.GenerateContent(ctx, model, []*genai.Content{{Role: "user", Parts: []*genai.Part{{InlineData: &genai.Blob{Data: data, MIMEType: mime}}}}}, &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: prompt}}}, ResponseMIMEType: "application/json", ResponseJsonSchema: ocrSchema()})
+	response, e := a.client.Models.GenerateContent(ctx, model, []*genai.Content{{Role: "user", Parts: []*genai.Part{{InlineData: &genai.Blob{Data: data, MIMEType: mime}}}}}, &genai.GenerateContentConfig{SystemInstruction: &genai.Content{Parts: []*genai.Part{{Text: (domain.Task{BasePrompt: basePrompt}).Instructions(prompt)}}}, ResponseMIMEType: "application/json", ResponseJsonSchema: ocrSchema()})
 	if e != nil {
 		return nil, e
 	}

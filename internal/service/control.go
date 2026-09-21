@@ -58,10 +58,39 @@ func (a *Control) Seed(ctx context.Context) error {
 	if e != nil {
 		return e
 	}
-	for k, body := range map[string]string{"job.extract_sleep": domain.OCRPrompt, "job.plan_reminder": domain.ReminderPrompt, "agent.loop": "承認済みの記録を根拠に判断する。材料が足りなければ保留する。不要な tool 呼び出しはしない。"} {
-		_, e = tx.EnsurePrompt(ctx, k, body, id)
-		if e != nil {
+	ids, e := tx.AllUserIDs(ctx)
+	if e != nil {
+		return e
+	}
+	for _, id := range ids {
+		if _, e = tx.EnsureSettings(ctx, id); e != nil {
 			return e
+		}
+		for k, body := range map[string]string{"job.weekly_report": domain.WeeklyPrompt, "job.extract_sleep": domain.OCRPrompt, "job.plan_reminder": domain.ReminderPrompt, "agent.loop": "承認済みの記録を根拠に判断する。材料が足りなければ保留する。不要な tool 呼び出しはしない。"} {
+			_, e = tx.EnsurePrompt(ctx, k, body, id)
+			if e != nil {
+				return e
+			}
+		}
+	}
+	return tx.Commit()
+}
+
+func (a *Control) EnsurePersonalAgent(ctx context.Context, id string) error {
+	tx, err := a.repo.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err = tx.EnsureSettings(ctx, id); err != nil {
+		return err
+	}
+	if err = tx.LockNotificationSettings(ctx, id); err != nil {
+		return err
+	}
+	for key, body := range map[string]string{"agent.loop": "承認済みの記録を根拠に判断する。材料が足りなければ保留する。不要な tool 呼び出しはしない。", "job.extract_sleep": domain.OCRPrompt, "job.plan_reminder": domain.ReminderPrompt, "job.weekly_report": domain.WeeklyPrompt} {
+		if _, err = tx.EnsurePrompt(ctx, key, body, id); err != nil {
+			return err
 		}
 	}
 	return tx.Commit()

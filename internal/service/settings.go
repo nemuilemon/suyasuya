@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"suyasuya/internal/notifier"
 
@@ -31,6 +32,20 @@ func (a *Control) SaveSettings(ctx context.Context, u domain.User, in domain.Set
 			}
 		}
 	}
+	if in.AgentName != nil {
+		*in.AgentName = strings.TrimSpace(*in.AgentName)
+		if utf8.RuneCountInString(*in.AgentName) > 80 || strings.ContainsAny(*in.AgentName, "\r\n") {
+			return nil, domain.Invalid("表示名は80文字以内で入力してください")
+		}
+	}
+	if in.WeeklyWeekday != nil && (*in.WeeklyWeekday < 0 || *in.WeeklyWeekday > 6) {
+		return nil, domain.Invalid("週次送信の曜日を確認してください")
+	}
+	if in.WeeklyTime != nil {
+		if _, err := time.Parse("15:04", *in.WeeklyTime); err != nil {
+			return nil, domain.Invalid("週次送信の時刻を確認してください")
+		}
+	}
 	if in.Webhook != nil {
 		*in.Webhook = strings.TrimSpace(*in.Webhook)
 	}
@@ -46,6 +61,11 @@ func (a *Control) SaveSettings(ctx context.Context, u domain.User, in domain.Set
 	defer tx.Rollback()
 	if e = tx.LockNotificationSettings(ctx, u.ID); e != nil {
 		return nil, e
+	}
+	if in.AgentName != nil {
+		if e = tx.SetAgentName(ctx, u.ID, *in.AgentName); e != nil {
+			return nil, e
+		}
 	}
 	if in.ClearWebhook {
 		e = tx.SetWebhook(ctx, u.ID, "")
@@ -63,13 +83,20 @@ func (a *Control) SaveSettings(ctx context.Context, u domain.User, in domain.Set
 		off := false
 		in.NotificationsEnabled = &off
 	}
+	if e = tx.SaveWeeklySettings(ctx, u.ID, in.WeeklyEnabled, in.WeeklyWeekday, in.WeeklyTime); e != nil {
+		return nil, e
+	}
 	if in.NotificationsEnabled != nil {
 		if *in.NotificationsEnabled {
 			configured, err := tx.WebhookConfigured(ctx, u.ID)
 			if err != nil {
 				return nil, err
 			}
-			if !configured || (in.Bedtime == "" && in.PVT == "") {
+			weekly, err := tx.WeeklyEnabled(ctx, u.ID)
+			if err != nil {
+				return nil, err
+			}
+			if !configured || (in.Bedtime == "" && in.PVT == "" && !weekly) {
 				return nil, domain.Invalid("Webhook と通知する時刻を設定してください")
 			}
 		}
@@ -84,10 +111,10 @@ func (a *Control) SaveSettings(ctx context.Context, u domain.User, in domain.Set
 }
 
 func (a *Control) Prompts(ctx context.Context, u domain.User) (any, error) {
-	if !u.Admin {
-		return nil, domain.Error{Code: 403, Message: "管理者のみ利用できます"}
+	if err := a.EnsurePersonalAgent(ctx, u.ID); err != nil {
+		return nil, err
 	}
-	out, e := a.repo.Prompts(ctx)
+	out, e := a.repo.Prompts(ctx, u.ID)
 	if e != nil {
 		return nil, e
 	}
@@ -95,10 +122,7 @@ func (a *Control) Prompts(ctx context.Context, u domain.User) (any, error) {
 }
 
 func (a *Control) SavePrompt(ctx context.Context, u domain.User, in domain.PromptInput) (any, error) {
-	if !u.Admin {
-		return nil, domain.Error{Code: 403, Message: "管理者のみ利用できます"}
-	}
-	if in.Key != "job.extract_sleep" && in.Key != "agent.loop" && in.Key != "job.plan_reminder" {
+	if in.Key != "job.extract_sleep" && in.Key != "agent.loop" && in.Key != "job.plan_reminder" && in.Key != "job.weekly_report" {
 		return nil, domain.Invalid("未対応のプロンプトです")
 	}
 	if len(strings.TrimSpace(in.Body)) == 0 || len(in.Body) > 32000 {
@@ -109,11 +133,11 @@ func (a *Control) SavePrompt(ctx context.Context, u domain.User, in domain.Promp
 		return nil, e
 	}
 	defer tx.Rollback()
-	_, e = tx.LockPrompt(ctx, in.Key)
+	_, e = tx.LockPrompt(ctx, in.Key, u.ID)
 	if e != nil {
 		return nil, e
 	}
-	_, e = tx.RetirePrompt(ctx, in.Key)
+	_, e = tx.RetirePrompt(ctx, in.Key, u.ID)
 	if e != nil {
 		return nil, e
 	}

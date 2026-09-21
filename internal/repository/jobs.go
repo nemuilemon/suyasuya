@@ -58,7 +58,7 @@ func (q *Queries) InsertResult(ctx context.Context, id string, uid string, outpu
 }
 
 func (q *Queries) JobPrompt(ctx context.Context, id string, uid string, dstPrompt *string) error {
-	return q.db.QueryRowContext(ctx, `SELECT c.body FROM job_config_versions v JOIN agent_config_versions c ON c.id=v.config_version_id JOIN jobs j ON j.id=v.job_id WHERE v.job_id=$1 AND j.user_id=$2 AND v.config_key='job.extract_sleep'`, id, uid).Scan(dstPrompt)
+	return q.db.QueryRowContext(ctx, `SELECT c.body FROM job_config_versions v JOIN agent_config_versions c ON c.id=v.config_version_id JOIN jobs j ON j.id=v.job_id WHERE v.job_id=$1 AND j.user_id=$2 AND c.user_id=j.user_id AND v.config_key='job.extract_sleep'`, id, uid).Scan(dstPrompt)
 }
 
 func (q *Queries) Jobs(ctx context.Context, userID string) ([]json.RawMessage, error) {
@@ -92,4 +92,10 @@ func (q *Queries) DeleteJobs(ctx context.Context, userID string, ids []string, c
 		return 0, err
 	}
 	return result.RowsAffected()
+}
+
+func (q *Queries) TaskBasePrompt(ctx context.Context, id, userID string) (string, error) {
+	var prompt string
+	err := q.db.QueryRowContext(ctx, `SELECT c.body FROM jobs j JOIN job_config_versions v ON v.job_id=j.id JOIN agent_config_versions c ON c.id=v.config_version_id WHERE j.id=$1 AND j.user_id=$2 AND c.user_id=j.user_id AND v.config_key='agent.loop'`, id, userID).Scan(&prompt)
+	return prompt, err
 }

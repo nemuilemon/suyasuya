@@ -19,7 +19,7 @@ type Result struct {
 	Error      string
 }
 type Notifier interface {
-	Send(context.Context, string, string) Result
+	Send(context.Context, string, string, string) Result
 }
 type Discord struct{ Client *http.Client }
 
@@ -30,11 +30,15 @@ func ValidURL(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && u.Scheme == "https" && u.Host == "discord.com" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && u.RawPath == "" && regexp.MustCompile(`^/api/webhooks/[0-9]+/[A-Za-z0-9_-]+$`).MatchString(u.Path)
 }
-func (d *Discord) Send(ctx context.Context, webhook, body string) Result {
+func (d *Discord) Send(ctx context.Context, webhook, body, displayName string) Result {
 	if !ValidURL(webhook) {
 		return Result{Error: "Webhook URL を確認してください"}
 	}
-	payload, _ := json.Marshal(map[string]any{"content": body, "username": "ありす / suyasuya", "allowed_mentions": map[string]any{"parse": []string{}}})
+	message := map[string]any{"content": body, "allowed_mentions": map[string]any{"parse": []string{}}}
+	if displayName != "" {
+		message["username"] = displayName
+	}
+	payload, _ := json.Marshal(message)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, webhook+"?wait=true", bytes.NewReader(payload))
 	if err != nil {
 		return Result{Error: "送信リクエストを作成できませんでした"}

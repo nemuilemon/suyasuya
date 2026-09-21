@@ -35,10 +35,14 @@ CREATE INDEX app_sessions_expiry ON app_sessions(expires_at);
 
 CREATE TABLE user_settings (
     user_id uuid PRIMARY KEY REFERENCES users(id),
+    agent_name text NOT NULL DEFAULT '',
     timezone text NOT NULL DEFAULT 'Asia/Tokyo', -- IANA 名はアプリで検証する
     target_bedtime time,
     pvt_reminder_time time,
     notifications_enabled boolean NOT NULL DEFAULT false,
+    weekly_report_enabled boolean NOT NULL DEFAULT false,
+    weekly_report_weekday smallint NOT NULL DEFAULT 1 CHECK (weekly_report_weekday BETWEEN 0 AND 6),
+    weekly_report_time time NOT NULL DEFAULT '09:00',
     snoozed_until timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -117,6 +121,7 @@ CREATE INDEX watch_sleep_observations_user_time ON watch_sleep_observations(user
 -- kind=prompt の例: agent.loop / job.extract_sleep / job.evaluate_sleep / job.plan_reminder / persona.arisu
 -- loop の指示も本文として管理し、使用版は job_config_versions で固定する。
 CREATE TABLE agent_config_versions (
+    user_id uuid NOT NULL REFERENCES users(id),
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     config_key text NOT NULL CHECK (btrim(config_key) <> ''),
     kind text NOT NULL CHECK (kind IN ('prompt', 'skill')),
@@ -125,10 +130,19 @@ CREATE TABLE agent_config_versions (
     is_active boolean NOT NULL DEFAULT false,
     created_by uuid NOT NULL REFERENCES users(id),
     created_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (config_key, version),
+    UNIQUE (user_id, config_key, version),
     UNIQUE (id, config_key)
 );
-CREATE UNIQUE INDEX agent_config_one_active ON agent_config_versions(config_key) WHERE is_active;
+CREATE UNIQUE INDEX agent_config_one_active ON agent_config_versions(user_id, config_key) WHERE is_active;
+CREATE FUNCTION set_agent_config_owner() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.user_id IS NULL THEN NEW.user_id:=NEW.created_by; END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER agent_config_set_owner BEFORE INSERT ON agent_config_versions
+ FOR EACH ROW EXECUTE FUNCTION set_agent_config_owner();
+
 -- 本文は上書きせず新版を追加。有効版の変更だけ UPDATE する。
 
 CREATE TABLE jobs (
@@ -172,6 +186,20 @@ CREATE TABLE job_config_versions (
     PRIMARY KEY (job_id, config_key),
     FOREIGN KEY (config_version_id, config_key) REFERENCES agent_config_versions(id, config_key)
 );
+
+
+-- Every task binds the shared base at creation, including future task kinds.
+CREATE FUNCTION bind_task_base_prompt() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ INSERT INTO job_config_versions(job_id,config_key,config_version_id)
+ SELECT NEW.id,config_key,id FROM agent_config_versions
+ WHERE config_key='agent.loop' AND user_id=NEW.user_id AND is_active
+ ON CONFLICT DO NOTHING;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER jobs_bind_base_prompt AFTER INSERT ON jobs
+ FOR EACH ROW EXECUTE FUNCTION bind_task_base_prompt();
 
 CREATE TABLE job_results (
     job_id uuid PRIMARY KEY,
@@ -284,7 +312,7 @@ CREATE TABLE notifications (
     user_id uuid NOT NULL REFERENCES users(id),
     decision_job_id uuid,
     dedup_key text NOT NULL,
-    kind text NOT NULL CHECK (kind IN ('bedtime', 'pvt', 'feedback')),
+    kind text NOT NULL CHECK (kind IN ('bedtime', 'pvt', 'feedback', 'weekly_report')),
     intensity text NOT NULL DEFAULT 'normal' CHECK (intensity IN ('normal', 'concern', 'strong')),
     body text NOT NULL,
     scheduled_at timestamptz NOT NULL,

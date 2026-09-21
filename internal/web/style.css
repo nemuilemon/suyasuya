@@ -312,3 +312,83 @@ nav {
 .record .actions {
   flex-wrap: wrap;
 }
+
+.summary-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+.summary-metrics strong {
+  display: block;
+  font-size: 1.4rem;
+  font-variant-numeric: tabular-nums;
+}
+.sleep-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-width: 540px;
+}
+.sleep-chart,
+.table-scroll {
+  overflow-x: auto;
+}
+.sleep-chart text {
+  font-size: 12px;
+  fill: #65786e;
+}
+.chart-grid {
+  stroke: #dfe5d9;
+  stroke-width: 1;
+}
+.chart-main {
+  fill: #315e51;
+}
+.chart-nap {
+  fill: #a6bd85;
+}
+.chart-trend {
+  stroke: #315e51;
+  stroke-width: 2;
+}
+.chart-target {
+  stroke: #b68c41;
+  stroke-width: 2;
+  stroke-dasharray: 6 5;
+}
+.chart-legend {
+  display: flex;
+  gap: 22px;
+  font-size: 0.85rem;
+}
+.chart-legend span:first-child {
+  color: #315e51;
+}
+.chart-legend span:last-child {
+  color: #769650;
+}
+.report-body {
+  white-space: pre-wrap;
+  color: inherit;
+}
+.table-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.table-scroll th,
+.table-scroll td {
+  padding: 8px;
+  text-align: left;
+  border-bottom: 1px solid #e5e9de;
+  white-space: nowrap;
+}
+.task-selection input[type="checkbox"] {
+  width: auto;
+}
+@media (max-width: 650px) {
+  .summary-metrics {
+    grid-template-columns: 1fr 1fr;
+  }
+}

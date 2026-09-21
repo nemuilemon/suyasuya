@@ -12,7 +12,6 @@ import (
 	"suyasuya/internal/platform"
 	"suyasuya/internal/repository"
 	"suyasuya/internal/service/ocr"
-	"suyasuya/internal/service/reminder"
 )
 
 func main() {
@@ -34,13 +33,14 @@ func run() error {
 	if e != nil {
 		return e
 	}
-	reminders, e := reminder.New(ctx, repository.New(db))
+	reasoner, e := agent.NewReasoner(ctx, repository.New(db))
 	if e != nil {
 		return e
 	}
 	return agent.New(queue, repository.New(db), map[string]agent.Handler{
 		"extract_sleep": svc.Execute,
-		"plan_reminder": reminders.Execute,
+		"plan_reminder": reasoner.Execute,
+		"weekly_report": reasoner.Execute,
 	}).Run(ctx)
 
 }

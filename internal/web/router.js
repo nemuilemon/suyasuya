@@ -3,7 +3,9 @@ import { showNotice, handleAction } from "./ui.js";
 import { renderRecordPage, renderRecordsPage } from "./pages-records.js";
 import { renderSettingsPage } from "./pages-settings.js";
 import { renderPVTPage, isMeasuring } from "./pages-pvt.js";
+import { renderAnalyticsPage } from "./pages-analytics.js";
 const routes = {
+  analytics: renderAnalyticsPage,
   record: renderRecordPage,
   records: renderRecordsPage,
   settings: renderSettingsPage,

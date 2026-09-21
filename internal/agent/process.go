@@ -53,7 +53,11 @@ func (a *Runner) Process(parent context.Context, id string) {
 			}
 		}
 	}()
-	output, e := a.execute(ctx, job)
+	job.BasePrompt, e = a.repo.TaskBasePrompt(ctx, job.ID, job.UserID)
+	var output []byte
+	if e == nil {
+		output, e = a.execute(ctx, job)
+	}
 	cleanup, cancelCleanup := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelCleanup()
 	if e != nil {

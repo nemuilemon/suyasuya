@@ -27,7 +27,7 @@ func (q *Queries) InsertOCRJob(ctx context.Context, jobID string, userID string,
 }
 
 func (q *Queries) BindOCRPrompt(ctx context.Context, jobID string) (sql.Result, error) {
-	return q.db.ExecContext(ctx, `INSERT INTO job_config_versions(job_id,config_key,config_version_id) SELECT $1,config_key,id FROM agent_config_versions WHERE config_key='job.extract_sleep' AND is_active`, jobID)
+	return q.db.ExecContext(ctx, `INSERT INTO job_config_versions(job_id,config_key,config_version_id) SELECT $1,config_key,id FROM agent_config_versions WHERE config_key='job.extract_sleep' AND user_id=(SELECT user_id FROM jobs WHERE id=$1) AND is_active`, jobID)
 }
 
 func (q *Queries) ImageLocation(ctx context.Context, id string, userID string, dstBucket *string, dstObject *string, dstGeneration *int64) error {

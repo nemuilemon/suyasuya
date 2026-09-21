@@ -22,12 +22,19 @@ export async function renderSettingsPage() {
       <label>PVT の測定時刻<input type="time" name="pvt_reminder_time" value="${escapeHTML((appState.settings.pvt_reminder_time || "").slice(0, 5))}">
       </label>
       </div>
-      <h2>Discord Webhook</h2>
+      <h2>Agent</h2>
+ <label>表示名<input name="agent_name" maxlength="80" value="${escapeHTML(appState.settings.agent_name || "")}" placeholder="空欄なら Discord の Webhook 名を使用"></label>
+ <h2>Discord Webhook</h2>
       <p>${appState.settings.webhook_configured ? "設定済み" : "未設定"}</p>
       <label>Webhook URL<input type="password" name="discord_webhook_url" autocomplete="new-password" placeholder="${appState.settings.webhook_configured ? "変更する場合のみ入力" : "https://discord.com/api/webhooks/…"}"></label>
       ${appState.settings.webhook_configured ? '<label><input type="checkbox" name="clear_webhook">Webhook 設定を削除</label>' : ""}
       <label><input type="checkbox" name="notifications_enabled" ${appState.settings.notifications_enabled ? "checked" : ""}>自動通知を有効にする</label>
       <p class="muted">就寝時刻・PVT 測定時刻に各1日1回送ります。時刻を空欄にすると、その通知を止められます。</p>
+      <h2>週次レポート</h2>
+      <label class="task-selection"><input type="checkbox" name="weekly_report_enabled" ${appState.settings.weekly_report_enabled ? "checked" : ""}>週1回、睡眠のまとめを送る</label>
+      <div class="row"><label>曜日<select name="weekly_report_weekday">${["日", "月", "火", "水", "木", "金", "土"].map((day, i) => `<option value="${i}" ${i === appState.settings.weekly_report_weekday ? "selected" : ""}>${day}曜日</option>`).join("")}</select></label>
+      <label>時刻<input type="time" name="weekly_report_time" required value="${escapeHTML((appState.settings.weekly_report_time || "09:00").slice(0, 5))}"></label></div>
+      <p class="muted">前週の月〜日を集計します。送信には上の「自動通知」も有効にしてください。</p>
       <button>保存</button>
       </form>
       </section>
@@ -46,6 +53,12 @@ export async function renderSettingsPage() {
       {
         ...Object.fromEntries(new FormData(e.target)),
         clear_webhook: new FormData(e.target).has("clear_webhook"),
+        weekly_report_enabled: new FormData(e.target).has(
+          "weekly_report_enabled",
+        ),
+        weekly_report_weekday: Number(
+          new FormData(e.target).get("weekly_report_weekday"),
+        ),
         notifications_enabled: new FormData(e.target).has(
           "notifications_enabled",
         ),
@@ -68,19 +81,20 @@ export async function renderSettingsPage() {
     renderNotificationHistory,
   );
   await renderNotificationHistory();
-  if (appState.user.is_admin) {
+  {
     const prompts = await request("/prompts");
     for (const key of [
       "job.extract_sleep",
       "agent.loop",
       "job.plan_reminder",
+      "job.weekly_report",
     ]) {
       const versions = prompts.filter((p) => p.config_key === key),
         active = versions.find((p) => p.is_active);
       const section = document.createElement("section");
       section.className = "card";
-      section.innerHTML = `<h2>${{ "agent.loop": "Agent loop の指示", "job.extract_sleep": "OCR の指示", "job.plan_reminder": "催促の指示" }[key]}</h2>
-      <p>${key === "job.extract_sleep" ? "新しい画像の読み取りから適用されます。" : "次に作成する催促から適用されます。"}</p>
+      section.innerHTML = `<h2>${{ "agent.loop": "Agent 共通の指示", "job.extract_sleep": "OCR の指示", "job.plan_reminder": "催促の目的", "job.weekly_report": "週次レポートの目的" }[key]}</h2>
+      ${key === "job.extract_sleep" ? "<p>新しい画像の読み取りから適用されます。</p>" : ""}
       <form>
       <label>版<select>${versions.map((v) => `<option value="${v.id}" ${v.is_active ? "selected" : ""}>v${v.version}${v.is_active ? "（使用中）" : ""}</option>`).join("")}</select>
       </label>
@@ -118,7 +132,12 @@ async function renderNotificationHistory() {
     failed: "失敗",
     cancelled: "取り消し",
   };
-  const kinds = { bedtime: "就寝の催促", pvt: "PVT", feedback: "接続テスト" };
+  const kinds = {
+    bedtime: "就寝の催促",
+    pvt: "PVT",
+    feedback: "接続テスト",
+    weekly_report: "週間レポート",
+  };
   container.innerHTML = notifications.length
     ? notifications
         .map(

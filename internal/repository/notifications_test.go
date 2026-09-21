@@ -35,6 +35,7 @@ func TestReminderDeliveryIntegration(t *testing.T) {
 		}
 	}
 	uid, other := platform.UUID(), platform.UUID()
+	defer cleanupNotificationFixtures(t, db, uid, other)
 	exec(`INSERT INTO users(id,username,password_hash) VALUES($1::uuid,$1::text,'test'),($2::uuid,$2::text,'test')`, uid, other)
 	exec(`INSERT INTO user_settings(user_id,notifications_enabled,target_bedtime) VALUES($1,true,'23:00'),($2,true,'23:00')`, uid, other)
 	exec(`INSERT INTO notification_destinations(user_id,discord_webhook_url) VALUES($1,'https://discord.com/api/webhooks/1/token'),($2,'https://discord.com/api/webhooks/2/token')`, uid, other)
@@ -59,7 +60,7 @@ func TestReminderDeliveryIntegration(t *testing.T) {
 		t.Fatalf("dedup %d %v", count, err)
 	}
 	prompt, err := repo.ReminderPrompt(ctx, jobID, uid)
-	if err != nil || prompt != "loop\n\nreminder" {
+	if err != nil || prompt != "reminder" {
 		t.Fatalf("bound prompt %q %v", prompt, err)
 	}
 	if _, err = repo.ReminderPrompt(ctx, jobID, other); err == nil {
