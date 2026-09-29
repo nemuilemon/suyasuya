@@ -17,9 +17,9 @@ export async function renderSettingsPage() {
       <label>タイムゾーン<input name="timezone" value="${escapeHTML(appState.settings.timezone)}" required>
       </label>
       <div class="row">
-      <label>目標の就寝時刻<input type="time" name="target_bedtime" value="${escapeHTML((appState.settings.target_bedtime || "").slice(0, 5))}">
+      <label>目標の就寝時刻<input type="text" inputmode="numeric" data-clock-time pattern="([01][0-9]|2[0-3]):?[0-5][0-9]" maxlength="5" placeholder="00:30" title="24時間表記で入力してください（00:30 または 0030）" name="target_bedtime" value="${escapeHTML((appState.settings.target_bedtime || "").slice(0, 5))}">
       </label>
-      <label>PVT の測定時刻<input type="time" name="pvt_reminder_time" value="${escapeHTML((appState.settings.pvt_reminder_time || "").slice(0, 5))}">
+      <label>PVT の測定時刻<input type="text" inputmode="numeric" data-clock-time pattern="([01][0-9]|2[0-3]):?[0-5][0-9]" maxlength="5" placeholder="00:30" title="24時間表記で入力してください（00:30 または 0030）" name="pvt_reminder_time" value="${escapeHTML((appState.settings.pvt_reminder_time || "").slice(0, 5))}">
       </label>
       </div>
       <h2>Agent</h2>
@@ -33,7 +33,7 @@ export async function renderSettingsPage() {
       <h2>週次レポート</h2>
       <label class="task-selection"><input type="checkbox" name="weekly_report_enabled" ${appState.settings.weekly_report_enabled ? "checked" : ""}>週1回、睡眠のまとめを送る</label>
       <div class="row"><label>曜日<select name="weekly_report_weekday">${["日", "月", "火", "水", "木", "金", "土"].map((day, i) => `<option value="${i}" ${i === appState.settings.weekly_report_weekday ? "selected" : ""}>${day}曜日</option>`).join("")}</select></label>
-      <label>時刻<input type="time" name="weekly_report_time" required value="${escapeHTML((appState.settings.weekly_report_time || "09:00").slice(0, 5))}"></label></div>
+      <label>時刻<input type="text" inputmode="numeric" data-clock-time pattern="([01][0-9]|2[0-3]):?[0-5][0-9]" maxlength="5" placeholder="00:30" title="24時間表記で入力してください（00:30 または 0030）" name="weekly_report_time" required value="${escapeHTML((appState.settings.weekly_report_time || "09:00").slice(0, 5))}"></label></div>
       <p class="muted">前週の月〜日を集計します。送信には上の「自動通知」も有効にしてください。</p>
       <button>保存</button>
       </form>
@@ -46,8 +46,20 @@ export async function renderSettingsPage() {
       </section>
       <div id="prompts">
       </div>`;
+  const timeInputs = select("#settings-form").querySelectorAll("[data-clock-time]");
+  const normalizeTimes = () => {
+    for (const input of timeInputs) {
+      if (/^([01][0-9]|2[0-3])[0-5][0-9]$/.test(input.value)) {
+        input.value = `${input.value.slice(0, 2)}:${input.value.slice(2)}`;
+      }
+    }
+  };
+  for (const input of timeInputs) {
+    input.addEventListener("blur", normalizeTimes);
+  }
   select("#settings-form").onsubmit = handleAction(async (e) => {
     e.preventDefault();
+    normalizeTimes();
     appState.settings = await request(
       "/settings",
       {

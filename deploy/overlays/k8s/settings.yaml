@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: suyasuya-config
+data:
+  GCS_BUCKET: replace-me-bucket
+  GCS_SIGNER_SERVICE_ACCOUNT: replace-me-signer@example-project.iam.gserviceaccount.com
+  APP_USERNAME: replace-me-user
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: control
+spec:
+  template:
+    spec:
+      containers:
+      - name: control
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /run/gcp/credentials.json
+        volumeMounts:
+        - name: gcp-credentials
+          mountPath: /run/gcp
+          readOnly: true
+      volumes:
+      - name: gcp-credentials
+        secret:
+          secretName: control-gcp-credentials
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+spec:
+  template:
+    spec:
+      containers:
+      - name: agent
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /run/gcp/credentials.json
+        volumeMounts:
+        - name: gcp-credentials
+          mountPath: /run/gcp
+          readOnly: true
+      volumes:
+      - name: gcp-credentials
+        secret:
+          secretName: agent-gcp-credentials

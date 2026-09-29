@@ -252,3 +252,7 @@ Gemini の function call ID と thought signature を保った履歴を返す。
 表示名も設定で変更でき、空欄では Discord Webhook 自体の名前を使う。共有コードに人格を固定しない。
 `docker/90-agent-goals.sql` は未編集の既定プロンプトだけを目的中心の新版にする。
 `docker/91-personal-agents.sql` は既存プロンプトを作成者の所有へ移行する。base 本文は保持する。
+
+## Kubernetes / GKE へのデプロイ
+
+[deploy/README.md](deploy/README.md) にマニフェスト・イメージ作成・認証・HTTPS 公開・Compose からのデータ移行手順をまとめている。

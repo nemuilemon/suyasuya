@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agent
+spec:
+  replicas: 0
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: agent
+  template:
+    metadata:
+      labels:
+        app: agent
+        app.kubernetes.io/part-of: suyasuya
+    spec:
+      serviceAccountName: agent
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      initContainers:
+      - name: wait-for-control
+        image: busybox:1.37
+        command:
+        - sh
+        - -ec
+        - until wget -q -O /dev/null http://control/healthz; do sleep 2; done
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 50m
+            memory: 16Mi
+          limits:
+            cpu: 100m
+            memory: 32Mi
+      containers:
+      - name: agent
+        image: suyasuya-agent
+        imagePullPolicy: IfNotPresent
+        envFrom:
+        - configMapRef:
+            name: suyasuya-config
+        env:
+        - name: DB_AGENT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: agent-secrets
+              key: DB_AGENT_PASSWORD
+        - name: GEMINI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: agent-secrets
+              key: GEMINI_API_KEY
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi

@@ -1,0 +1,22 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: control
+  namespace: suyasuya
+spec:
+  ingressClassName: replace-me-controller
+  tls:
+  - hosts:
+    - sleep.example.com
+    secretName: control-tls
+  rules:
+  - host: sleep.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: control
+            port:
+              number: 80

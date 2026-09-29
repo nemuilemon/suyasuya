@@ -5,3 +5,6 @@
 !cmd/**
 !internal/
 !internal/**
+!schema.sql
+!docker/
+!docker/20-roles.sh

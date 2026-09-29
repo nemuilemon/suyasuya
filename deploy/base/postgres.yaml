@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        app.kubernetes.io/part-of: suyasuya
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 70
+        runAsGroup: 70
+        fsGroup: 70
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 60
+      containers:
+      - name: postgres
+        image: suyasuya-postgres
+        ports:
+        - name: postgres
+          containerPort: 5432
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        env:
+        - name: POSTGRES_DB
+          value: suyasuya
+        - name: POSTGRES_USER
+          value: suyasuya_admin
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: DB_CONTROL_USER
+          value: suyasuya_control
+        - name: DB_AGENT_USER
+          value: suyasuya_agent
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secrets
+              key: POSTGRES_PASSWORD
+        - name: DB_CONTROL_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secrets
+              key: DB_CONTROL_PASSWORD
+        - name: DB_AGENT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secrets
+              key: DB_AGENT_PASSWORD
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+        startupProbe:
+          exec:
+            command:
+            - sh
+            - -ec
+            - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+          timeoutSeconds: 3
+          periodSeconds: 5
+          failureThreshold: 120
+        readinessProbe:
+          exec:
+            command:
+            - sh
+            - -ec
+            - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+          timeoutSeconds: 3
+          periodSeconds: 5
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -ec
+            - pg_isready -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+          timeoutSeconds: 3
+          periodSeconds: 10
+          failureThreshold: 6
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+spec:
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+  - name: postgres
+    port: 5432
+    targetPort: postgres

@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://sleep.example.com"],
+    "method": ["PUT", "GET", "HEAD"],
+    "responseHeader": ["Content-Type", "x-goog-if-generation-match", "ETag"],
+    "maxAgeSeconds": 3600
+  }
+]
