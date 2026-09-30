@@ -3,23 +3,23 @@ kind: ConfigMap
 metadata:
   name: suyasuya-config
 data:
-  GCS_BUCKET: replace-me-bucket
-  GCS_SIGNER_SERVICE_ACCOUNT: suyasuya-control@example-project.iam.gserviceaccount.com
-  APP_USERNAME: replace-me-user
+  GCS_BUCKET: suyasuya-sleep-images
+  GCS_SIGNER_SERVICE_ACCOUNT: suyasuya-control@suyasuya-prod.iam.gserviceaccount.com
+  APP_USERNAME: nemuilemon
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: control
   annotations:
-    iam.gke.io/gcp-service-account: suyasuya-control@example-project.iam.gserviceaccount.com
+    iam.gke.io/gcp-service-account: suyasuya-control@suyasuya-prod.iam.gserviceaccount.com
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: agent
   annotations:
-    iam.gke.io/gcp-service-account: suyasuya-agent@example-project.iam.gserviceaccount.com
+    iam.gke.io/gcp-service-account: suyasuya-agent@suyasuya-prod.iam.gserviceaccount.com
 ---
 apiVersion: apps/v1
 kind: StatefulSet

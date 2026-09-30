@@ -5,19 +5,19 @@ resources:
 - ingress.yaml
 images:
 - name: suyasuya-control
-  newName: asia-northeast1-docker.pkg.dev/example-project/suyasuya/control
-  newTag: replace-me-tag
+  newName: asia-northeast1-docker.pkg.dev/suyasuya-prod/suyasuya/control
+  newTag: deploy-20260930-1
 - name: suyasuya-agent
-  newName: asia-northeast1-docker.pkg.dev/example-project/suyasuya/agent
-  newTag: replace-me-tag
+  newName: asia-northeast1-docker.pkg.dev/suyasuya-prod/suyasuya/agent
+  newTag: deploy-20260930-1
 - name: suyasuya-postgres
-  newName: asia-northeast1-docker.pkg.dev/example-project/suyasuya/postgres
-  newTag: replace-me-tag
+  newName: asia-northeast1-docker.pkg.dev/suyasuya-prod/suyasuya/postgres
+  newTag: deploy-20260930-1
 replicas:
 - name: control
-  count: 0
+  count: 1
 - name: agent
-  count: 0
+  count: 1
 patches:
 - path: settings.yaml
 namespace: suyasuya
