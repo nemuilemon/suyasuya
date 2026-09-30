@@ -54,7 +54,7 @@ services:
       <<: *common
       DB_CONTROL_USER: ${DB_CONTROL_USER:-suyasuya_control}
       DB_CONTROL_PASSWORD: ${DB_CONTROL_PASSWORD:?set DB_CONTROL_PASSWORD}
-      APP_USERNAME: ${APP_USERNAME:-mouchan}
+      APP_USERNAME: ${APP_USERNAME:-nemuilemon}
       APP_PASSWORD: ${APP_PASSWORD:?set APP_PASSWORD}
       APP_SECURE_COOKIE: ${APP_SECURE_COOKIE:-false}
     volumes:

@@ -32,7 +32,7 @@ func (a *Control) Health(ctx context.Context) error {
 	return a.queue.Ping(ctx).Err()
 }
 func (a *Control) Seed(ctx context.Context) error {
-	name := platform.Env("APP_USERNAME", "mouchan")
+	name := platform.Env("APP_USERNAME", "nemuilemon")
 	password := os.Getenv("APP_PASSWORD")
 	if len(password) < 12 {
 		return fmt.Errorf("APP_PASSWORD must contain at least 12 characters")
