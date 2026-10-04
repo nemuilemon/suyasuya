@@ -273,4 +273,5 @@ thought signature は記録しない。tool の結果には本人の睡眠記録
 
 ## Kubernetes / GKE へのデプロイ
 
-[deploy/README.md](deploy/README.md) にマニフェスト・イメージ作成・認証・HTTPS 公開・Compose からのデータ移行手順をまとめている。
+日常の操作は `./suyasuyactl.sh` にまとめてある（`dev up` / `dev test` / `gke deploy` / `gke migrate docker/NN-*.sql` など。引数なしで一覧）。
+初回構築は [deploy/README.md](deploy/README.md) にマニフェスト・イメージ作成・認証・HTTPS 公開・Compose からのデータ移行手順をまとめている。
