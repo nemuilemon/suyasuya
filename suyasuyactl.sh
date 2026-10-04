@@ -125,8 +125,8 @@ gke_rollout() {
 
 gke_backup() {
   umask 077
-  mkdir -p tmp/backup
-  local out="tmp/backup/gke-$(date +%Y%m%d-%H%M%S).dump"
+  mkdir -p data/backup
+  local out="data/backup/gke-$(date +%Y%m%d-%H%M%S).dump"
   info "pg_dump → $out"
   kc exec postgres-0 -- sh -ec 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "$out"
   [[ -s "$out" ]] || die "backup が空: $out"
@@ -203,7 +203,7 @@ gke（本番、context=$KUBE_CONTEXT）
   logs [control|agent]
   restart control|agent
   psql              本番 DB に入る
-  backup            pg_dump を tmp/backup/ に取る
+  backup            pg_dump を data/backup/ に取る
   migrate FILE      backup を取ってから docker/NN-*.sql を本番 DB に適用
   secrets           deploy/secrets/*.env を Secret に反映
 
