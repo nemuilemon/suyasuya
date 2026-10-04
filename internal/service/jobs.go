@@ -73,3 +73,17 @@ func (a *Control) DeleteJobs(ctx context.Context, u domain.User, in domain.Delet
 	}
 	return map[string]int64{"deleted": count}, nil
 }
+
+// AgentRuns lists the user's recent tasks of every kind for the agent log.
+func (a *Control) AgentRuns(ctx context.Context, u domain.User) (any, error) {
+	return a.repo.AgentRuns(ctx, u.ID)
+}
+
+// JobSteps returns the recorded trace of one of the user's tasks: model
+// rounds, tool calls with their arguments and results, and the outcome.
+func (a *Control) JobSteps(ctx context.Context, u domain.User, id string) (any, error) {
+	if !platform.ValidID(id) {
+		return nil, domain.Invalid("job ID が不正です")
+	}
+	return a.repo.JobSteps(ctx, id, u.ID)
+}

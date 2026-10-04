@@ -253,6 +253,24 @@ Gemini の function call ID と thought signature を保った履歴を返す。
 `docker/90-agent-goals.sql` は未編集の既定プロンプトだけを目的中心の新版にする。
 `docker/91-personal-agents.sql` は既存プロンプトを作成者の所有へ移行する。base 本文は保持する。
 
+## agent ログ
+
+管理画面の「agent ログ」で、task ごとに agent が何をしたかを読み返せる。直近50件の task（画像の読み取り・催促・週間レポート）を
+一覧し、開くと次の順で表示する。
+
+- **開始**：task の種別と入力
+- **モデル**：各ラウンドの本文、要求した tool、token 数（入力・出力・思考）。最後のラウンドは最終回答（構造化 JSON）
+- **tool**：tool 名・引数・結果・成否・所要時間。上限超過（`tool_call_limit_reached`）や引数エラーも失敗として残る
+- **結果 / エラー**：handler が返した最終出力、または失敗理由
+
+記録は `job_steps` に保存する。1 回の claim（lease）が 1 回の実行で、再試行は別の実行として並ぶ。
+agent は lease を持っている間だけ追記でき（UPDATE / DELETE 権限なし）、中止・削除で lease を失った実行は書き込めない。
+1 項目 8KB を超える引数・結果は preview に切り詰める。記録の書き込みに失敗しても task は止めず、log に残す。
+thought signature は記録しない。tool の結果には本人の睡眠記録が含まれるため、読めるのは task の所有者だけ。
+
+既存 DB には `docker/92-agent-steps.sql` を適用する（control / agent は動かしたままでよい）。
+古い記録の自動削除はまだない。
+
 ## Kubernetes / GKE へのデプロイ
 
 [deploy/README.md](deploy/README.md) にマニフェスト・イメージ作成・認証・HTTPS 公開・Compose からのデータ移行手順をまとめている。

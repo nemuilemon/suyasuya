@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -36,6 +37,11 @@ func (a *Runner) Process(parent context.Context, id string) {
 	}
 	ctx, cancel := context.WithTimeout(parent, 120*time.Second)
 	defer cancel()
+	// The lease names this run: a retry gets a new one, so its trace starts fresh.
+	rec := newDBRecorder(a.repo, id, job.UserID, lease)
+	ctx = WithRecorder(ctx, rec)
+	started := time.Now()
+	rec.Record(ctx, Step{Kind: StepStart, Name: job.Kind, Input: job.Input, OK: true})
 	// 定期確認で control からの中止を拾う。保存済み状態は最後にも照合する。
 	go func() {
 		t := time.NewTicker(time.Second)
@@ -62,9 +68,11 @@ func (a *Runner) Process(parent context.Context, id string) {
 	defer cancelCleanup()
 	if e != nil {
 		log.Printf("task %s: %s", id, platform.SafeError(e))
+		rec.Record(ctx, Step{Kind: StepError, Name: job.Kind, Output: map[string]any{"error": platform.SafeError(e)}, Duration: time.Since(started)})
 		a.repo.FailJob(cleanup, id, job.UserID, lease, "タスクの処理に失敗しました。設定や入力を確認して再試行してください。")
 		return
 	}
+	rec.Record(ctx, Step{Kind: StepFinal, Name: job.Kind, Output: json.RawMessage(output), OK: true, Duration: time.Since(started)})
 	tx, e := a.repo.Begin(cleanup)
 	if e != nil {
 		return

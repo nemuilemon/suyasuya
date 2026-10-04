@@ -159,3 +159,19 @@ func (h *Handler) DeleteJobs(w http.ResponseWriter, r *http.Request, u domain.Us
 	}
 	return reply(w, result)
 }
+
+func (h *Handler) AgentRuns(w http.ResponseWriter, r *http.Request, u domain.User) error {
+	out, e := h.service.AgentRuns(r.Context(), u)
+	if e != nil {
+		return e
+	}
+	return reply(w, out)
+}
+
+func (h *Handler) JobSteps(w http.ResponseWriter, r *http.Request, u domain.User) error {
+	out, e := h.service.JobSteps(r.Context(), u, r.PathValue("id"))
+	if e != nil {
+		return e
+	}
+	return reply(w, out)
+}

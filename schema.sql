@@ -208,6 +208,25 @@ CREATE TABLE job_results (
     created_at timestamptz NOT NULL DEFAULT now(),
     FOREIGN KEY (job_id, user_id) REFERENCES jobs(id, user_id)
 );
+-- agent の実行記録。1 回の claim（lease）が 1 run。model の各ラウンド・tool 呼び出し・結果を順に残す。
+-- agent は lease を持っている間だけ追記できる。本人が「何を見て、どう判断したか」を読み返すためのもの。
+CREATE TABLE job_steps (
+    job_id uuid NOT NULL,
+    user_id uuid NOT NULL,
+    run_id uuid NOT NULL, -- claim 時の lease_token。再試行は別 run になる
+    seq integer NOT NULL CHECK (seq >= 1),
+    kind text NOT NULL CHECK (kind IN ('start', 'model', 'tool', 'final', 'error')),
+    name text, -- model 名・tool 名・task 種別
+    input jsonb, -- tool の引数、start では task の入力
+    output jsonb, -- tool の結果・model の本文と要求した tool・最終結果。8KB を超えると preview に切り詰める
+    ok boolean NOT NULL DEFAULT false,
+    duration_ms bigint CHECK (duration_ms >= 0),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (job_id, run_id, seq),
+    FOREIGN KEY (job_id, user_id) REFERENCES jobs(id, user_id)
+);
+CREATE INDEX job_steps_user ON job_steps(user_id, created_at DESC);
+
 -- extract_sleep の output は候補配列。配列 index を以下の source_candidate_index に使う。
 -- 未承認の候補は sleep_records に自動反映しない。
 
@@ -335,12 +354,13 @@ CREATE INDEX notifications_user_history ON notifications(user_id, created_at DES
 GRANT USAGE ON SCHEMA public TO suyasuya_control, suyasuya_agent;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
     users, app_sessions, user_settings, notification_destinations, uploads, agent_config_versions,
-    jobs, job_config_versions, job_results, sleep_records, pvt_sessions,
+    jobs, job_config_versions, job_results, job_steps, sleep_records, pvt_sessions,
     job_sleep_records, notifications, watch_devices, watch_sleep_observations, sleep_watch_links TO suyasuya_control;
 
 GRANT SELECT ON user_settings, uploads, agent_config_versions, jobs, job_config_versions,
     job_results, sleep_records, pvt_sessions, job_sleep_records, notifications TO suyasuya_agent;
 GRANT INSERT ON job_results TO suyasuya_agent;
+GRANT INSERT ON job_steps TO suyasuya_agent;
 GRANT SELECT ON watch_sleep_observations, sleep_watch_links TO suyasuya_agent;
 GRANT UPDATE (status, attempts, lease_token, lease_expires_at, started_at, finished_at, error)
     ON jobs TO suyasuya_agent;

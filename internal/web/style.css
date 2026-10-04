@@ -392,3 +392,54 @@ nav {
     grid-template-columns: 1fr 1fr;
   }
 }
+/* agent log */
+.agent-run {
+  margin: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid #e5e9de;
+}
+.agent-run:last-child {
+  border: 0;
+}
+.agent-run > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+}
+.agent-run-head {
+  margin: 16px 0 6px;
+  font-size: 0.95rem;
+}
+.agent-step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 12px;
+  border-left: 2px solid #e5e9de;
+}
+.agent-step {
+  padding: 8px 0 8px 10px;
+}
+.agent-step details {
+  margin: 4px 0;
+}
+.agent-step pre {
+  margin: 4px 0;
+  padding: 8px 10px;
+  background: #f4f6f0;
+  border-radius: 6px;
+  max-height: 320px;
+  overflow: auto;
+}
+.agent-step-tool .tag {
+  background: #dde8f3;
+  color: #3a5670;
+}
+.agent-step.failed .tag,
+.agent-step-error .tag {
+  background: #f6e1dc;
+  color: #8a3b2b;
+}
+.agent-error {
+  color: #8a3b2b;
+}

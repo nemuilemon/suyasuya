@@ -105,6 +105,11 @@ BEGIN
         OR has_schema_privilege('suyasuya_agent', 'public', 'CREATE') THEN
         RAISE EXCEPTION 'agent の権限が過大';
     END IF;
+    IF NOT has_table_privilege('suyasuya_agent', 'job_steps', 'INSERT')
+        OR has_table_privilege('suyasuya_agent', 'job_steps', 'UPDATE')
+        OR has_table_privilege('suyasuya_agent', 'job_steps', 'DELETE') THEN
+        RAISE EXCEPTION 'agent の job_steps 権限が追記だけになっていない';
+    END IF;
     IF NOT has_table_privilege('suyasuya_agent', 'job_results', 'INSERT')
         OR NOT has_column_privilege('suyasuya_agent', 'jobs', 'status', 'UPDATE') THEN
         RAISE EXCEPTION 'agent の実行権限が不足';
