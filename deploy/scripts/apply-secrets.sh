@@ -32,13 +32,22 @@ for name, expected in keys.items():
     if data.keys() != expected:
         sys.exit(f'Unexpected or missing keys in {name}.env')
     values[name] = data
+cf = root / 'cloudflared.env'
+if cf.is_file():
+    lines = [l for l in cf.read_text().splitlines() if l and not l.startswith('#')]
+    key, sep, value = (lines[0].partition('=') if len(lines) == 1 else ('', '', ''))
+    if key != 'TUNNEL_TOKEN' or not sep or len(value) < 100 or value.startswith('replace_'):
+        sys.exit('Invalid cloudflared.env: expected one TUNNEL_TOKEN= line (value omitted)')
 for component, key in [('control', 'DB_CONTROL_PASSWORD'), ('agent', 'DB_AGENT_PASSWORD')]:
     if values['postgres'][key] != values[component][key]:
         sys.exit(f'{key} must match in postgres.env and {component}.env')
 PY
 kubectl --context "$1" create namespace suyasuya --dry-run=client -o yaml |
   kubectl --context "$1" apply --server-side -f -
-for component in postgres control agent; do
+components=(postgres control agent)
+# cloudflared.env is optional: only the GKE overlay runs cloudflared.
+[[ -f "$secret_dir/cloudflared.env" ]] && components+=(cloudflared)
+for component in "${components[@]}"; do
   kubectl --context "$1" -n suyasuya create secret generic "$component-secrets" \
     --from-env-file="$secret_dir/$component.env" --dry-run=client -o yaml |
     kubectl --context "$1" -n suyasuya apply --server-side -f -

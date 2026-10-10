@@ -33,7 +33,7 @@ gcloud container node-pools update '利用するnode-pool名' --cluster="$CLUSTE
   --location="$LOCATION" --project="$PROJECT_ID" --workload-metadata=GKE_METADATA
 ```
 
-VPC-native / HttpLoadBalancing / Persistent Disk CSI driver、NetworkPolicy を実施する CNI も必要。
+VPC-native / Persistent Disk CSI driver、NetworkPolicy を実施する CNI も必要。
 node の service account には GKE の標準的な node 権限と Artifact Registry の読み取り権限を設定する。
 既存の node pool を変更する際は、そのクラスタの他アプリへの影響も確認する。
 
@@ -81,23 +81,15 @@ CORS の origin を公開 URL に合わせる操作は [本体手順](README.md#
 既存の署名用 account を使う場合は、署名権限をその account に付け、署名者自身にも object 作成・読み取り権限を付ける。
 Gemini API は今までの API key を Secret から渡す。GCS の認証とは別。
 
-## Ingress の固定 IP と DNS
+## 公開（Cloudflare Tunnel）
 
-```sh
-gcloud compute addresses create suyasuya-ip --global --project="$PROJECT_ID"
-gcloud compute addresses describe suyasuya-ip --global --project="$PROJECT_ID" --format='value(address)'
-```
+外部 LB は使わない。cluster 内の cloudflared が Cloudflare に外向きに繋ぎ、control Service の80番へ転送する。
+手順は [本体手順](README.md#4-gke-の-gcs-認証https)。固定 IP・ManagedCertificate・FrontendConfig・BackendConfig は不要。
 
-その IP を公開ドメインの A record に設定し、GKE overlay の Ingress と ManagedCertificate の domain を揃える。
-固定 IP 名を変更した場合は `kubernetes.io/ingress.global-static-ip-name` も変更する。
-誤った AAAA record や別サービスへの proxy は証明書の検証に影響するので、DNS を直接 GKE の公開先へ向ける。
-
-`BackendConfig` は `/healthz` の8080番をチェックし、`FrontendConfig` は HTTP を HTTPS に redirect する。
-GKE Ingress は `kubernetes.io/ingress.class: gce` を使う。汎用 Kubernetes の `ingressClassName` と混ぜない。
-LB と証明書を作るのは overlay 適用後。公開 URL で認証・画像 upload まで確認して切り替える。
+2026-10-09 までは GCE Ingress（固定 IP `suyasuya-ip` + ManagedCertificate）だった。
+転送ルール 2 本分の費用を削るために外した。
 
 ## 公式資料
 
 - [Workload Identity の有効化と service account の紐づけ](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/workload-identity)
-- [BackendConfig / FrontendConfig](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/ingress-configuration)
-- [ManagedCertificate と固定 IP](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/secure-traffic-management)
+- [Cloudflare Tunnel を Kubernetes で動かす](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/deployment-guides/kubernetes/)

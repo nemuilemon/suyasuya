@@ -159,7 +159,7 @@ gke() {
       kubectl --context "$KUBE_CONTEXT" apply -k "$OVERLAY"
       gke_rollout ;;
     diff)     kubectl --context "$KUBE_CONTEXT" diff -k "$OVERLAY" || true ;;
-    status|ps) kc get pods,pvc,svc,ingress
+    status|ps) kc get pods,pvc,svc
                info "tag: $(current_tag)" ;;
     logs)     kc logs -f --tail=100 "deployment/${1:-agent}" ;;
     restart)  kc rollout restart "deployment/${1:?control か agent}"
@@ -199,7 +199,7 @@ gke（本番、context=$KUBE_CONTEXT）
                     TAG 省略時は deploy-YYYYMMDD-N。未 commit があると止まる（ALLOW_DIRTY=1）
   apply             image は変えず overlay の差分だけ適用
   diff              overlay と cluster の差分
-  status            pods / pvc / svc / ingress と今の tag
+  status            pods / pvc / svc と今の tag
   logs [control|agent]
   restart control|agent
   psql              本番 DB に入る

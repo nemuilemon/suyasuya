@@ -14,8 +14,8 @@
 | Redis | StatefulSet、1 GiB PVC、AOF |
 | 設定 | ConfigMap。アプリ・DB の資格情報は用途別の3つの Secret |
 | GKE の GCS 認証 | Workload Identity Federation、control / agent 別の IAM service account |
-| GKE の公開 | GCE Ingress、固定 IP、ManagedCertificate、HTTPS リダイレクト、BackendConfig |
-| 通信 | DB・Redis への ingress は同 namespace の control / agent のみ。agent への ingress は閉じる |
+| GKE の公開 | cluster 内の cloudflared（Cloudflare Tunnel、2 replica + PDB）→ control Service の80番。外部 LB・固定 IP は使わない |
+| 通信 | DB・Redis への ingress は同 namespace の control / agent のみ。agent への ingress は閉じる。GKE では control への ingress も cloudflared / agent のみ、cloudflared への ingress は閉じる |
 
 単一 replica の小規模構成。DB / Redis は高可用構成ではなく、バックアップは別途必要。
 control / agent は `Recreate` で更新時に短い停止がある。
@@ -28,7 +28,7 @@ control の readiness は DB と Redis の疎通、liveness は HTTP port の応
 ## 1. 接続先と設定
 
 用意するもの：kubectl（Kustomize 付き）、Docker buildx、python3、公開先 registry、永続ボリュームに対応した Kubernetes cluster。
-GKE では gcloud、VPC-native cluster、HttpLoadBalancing、Persistent Disk CSI driver、Workload Identity Federation を利用する。
+GKE では gcloud、VPC-native cluster、Persistent Disk CSI driver、Workload Identity Federation を利用する。
 NetworkPolicy が効く CNI（GKE Dataplane V2 等）を使う。GKE Standard ではアプリを配置する node pool も `GKE_METADATA` を有効にする。
 
 ```sh
@@ -42,7 +42,7 @@ export OVERLAY='deploy/overlays/gke' # 汎用 Kubernetes は deploy/overlays/k8s
 - `$OVERLAY/kustomization.yaml`：3つの image の registry / tag。
 - `$OVERLAY/settings.yaml`：GCS bucket、署名用 service account、初期管理者 `APP_USERNAME`。
 - GKE は同ファイルの control / agent の IAM service account annotation。
-- GKE は `ingress.yaml` の host・証明書の domain・固定 IP 名。host と domain は同じ値にする。
+- GKE の公開 hostname は Cloudflare の Tunnel の route 側で決める（manifest には書かない）。
 - GKE の `standard-rwo`、汎用 Kubernetes の default StorageClass が実在することを確認する。
 - 既存データを移す場合、`APP_USERNAME` は現在のユーザー名に合わせる。
 
@@ -81,13 +81,14 @@ cp deploy/secrets/control.env.example deploy/secrets/control.env
 cp deploy/secrets/agent.env.example deploy/secrets/agent.env
 ```
 
-3ファイルを編集する。`KEY=値` をそのまま記載し、値を引用符で囲まない。local `.env` 全体を渡さない。
+3ファイルを編集する。GKE では Tunnel の token を入れる `cloudflared.env` も作る（下）。`KEY=値` をそのまま記載し、値を引用符で囲まない。local `.env` 全体を渡さない。
 `deploy/secrets/` は例以外を Git 対象外にしている。
 
 - `postgres.env`：管理者 password と、control / agent の DB password。
 - `control.env`：control の DB password と初期管理者の `APP_PASSWORD`。
 - `agent.env`：agent の DB password と `GEMINI_API_KEY`。
 - 同じ role の DB password はファイル間で一致させる。
+- `cloudflared.env`（GKE のみ）：`TUNNEL_TOKEN=` の1行。Zero Trust の Tunnel 作成画面の `--token` の値。無ければ script は飛ばす。
 - 既存ユーザーの login password は DB に保存されている。`APP_PASSWORD` の変更だけでは既存ユーザーの password は変わらない。
 
 ```sh
@@ -105,9 +106,15 @@ control を signed URL の signer とし、bucket に object 作成・読み取�
 agent は bucket の object 読み取りだけを許可する。
 GKE overlay は JSON key を mount せず、ADC が GKE metadata server を使う。
 
-固定 global IP を予約し、DNS の A record をその IP に向ける。ManagedCertificate の domain を一致させる。
-Cloudflare DNS を使う場合、証明書の発行・検証中は DNS only で直接 GKE の IP を指す。
-この公開経路は GKE Ingress。現在 local で使っている Cloudflare Tunnel daemon の設定は変更しない。
+公開は cluster 内の cloudflared（`overlays/gke/cloudflared.yaml`）が受け持つ。Tunnel は remote-managed で、
+route と DNS は Cloudflare の UI で設定する（2026-10-10 に GCE Ingress から移行。外部 LB の転送ルールの費用を削るため）。
+
+1. Zero Trust → Networks → Tunnels で Tunnel を作り、token を `deploy/secrets/cloudflared.env` に書いて `apply-secrets.sh` を流す
+2. overlay を apply し、Tunnel が HEALTHY になるのを確認する
+3. Public Hostname に公開 hostname → `HTTP` / `control:80` を足す（同名の DNS record が既にあれば先に消す）
+
+TLS は Cloudflare の edge で終端し、cloudflared → control は cluster 内の HTTP。
+control は `X-Forwarded-Proto` を見て session cookie に Secure を付ける。CF Access は掛けていない（審査員が使うため。アプリの login で守る）。
 
 `deploy/examples/gcs-cors.json` の origin を本番 URL に置き換える。
 既存 bucket の CORS は先に確認し、開発用 origin も必要なら同じファイルに残す。
@@ -193,8 +200,8 @@ kubectl --context "$KUBE_CONTEXT" -n suyasuya get pods,pvc,svc
 kubectl --context "$KUBE_CONTEXT" -n suyasuya logs deployment/agent --tail=30
 ```
 
-GKE は `kubectl --context "$KUBE_CONTEXT" -n suyasuya describe managedcertificate control` で `Active` を確認する。
-証明書発行・LB の準備には時間がかかる。HTTPS のログイン、記録一覧、画像 PUT → OCR、PVT、設定保存を確認する。
+GKE は `kubectl --context "$KUBE_CONTEXT" -n suyasuya logs deployment/cloudflared` で `Registered tunnel connection` を確認する。
+HTTPS のログイン、記録一覧、画像 PUT → OCR、PVT、設定保存を確認する。
 定時処理は保存済み設定で再開する。local と GKE の control / agent を同時に動かすと重複通知につながるので、切り替え後は local 側を停止したままにする。
 
 戻す場合はまず GKE 側の control / agent を0 replica にする。移行後に GKE に追加したデータがあれば、旧 local をそのまま起動せず、逆方向の DB 移行も行う。
@@ -218,5 +225,4 @@ dump には個人データ・送信先が含まれるので Git に入れず、�
 ## 参考
 
 - [Workload Identity Federation for GKE](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/workload-identity)
-- [GKE Ingress の設定](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/ingress-configuration)
-- [GKE の Google 管理証明書](https://docs.cloud.google.com/kubernetes-engine/docs/how-to/secure-traffic-management)
+- [Cloudflare Tunnel を Kubernetes で動かす](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/deployment-guides/kubernetes/)
