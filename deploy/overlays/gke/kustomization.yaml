@@ -6,10 +6,10 @@ resources:
 images:
 - name: suyasuya-control
   newName: asia-northeast1-docker.pkg.dev/suyasuya-prod/suyasuya/control
-  newTag: deploy-20261004-1
+  newTag: deploy-20261012-1
 - name: suyasuya-agent
   newName: asia-northeast1-docker.pkg.dev/suyasuya-prod/suyasuya/agent
-  newTag: deploy-20261004-1
+  newTag: deploy-20261012-1
 - name: suyasuya-postgres
   newName: asia-northeast1-docker.pkg.dev/suyasuya-prod/suyasuya/postgres
   newTag: deploy-20260930-1
