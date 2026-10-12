@@ -4,6 +4,7 @@ import { select, escapeHTML, handleAction, showNotice, newID } from "./ui.js";
 import {
   durationChart,
   bedtimeChart,
+  dayDetail,
   durationLabel,
   clockLabel,
 } from "./sleep-charts.js";
@@ -29,8 +30,8 @@ export async function renderAnalyticsPage() {
     <p class="muted">承認済みの記録 · ${escapeHTML(appState.settings.timezone)} · 未記録は空欄で表示</p>
     <div id="sleep-metrics" class="summary-metrics"></div>
   </section>
-  <section class="card"><h2>睡眠時間</h2><p class="chart-legend"><span>● 主睡眠</span><span>● 昼寝</span></p><div id="duration-chart" class="sleep-chart"></div></section>
-  <section class="card"><h2>就寝時刻</h2><p class="muted">主睡眠の日付は起床日。複数記録がある日は最初の就寝時刻を表示します。破線は目標時刻です。</p><div id="bedtime-chart" class="sleep-chart"></div><details><summary>日別の数値</summary><div id="sleep-table" class="table-scroll"></div></details></section>
+  <section class="card"><h2>睡眠時間</h2><p class="chart-legend"><span>● 主睡眠</span><span>● 昼寝</span></p><div id="duration-chart" class="sleep-chart"></div><div class="chart-detail" aria-live="polite"><span class="muted">棒や点を選ぶと、その日の詳細を表示します。</span></div></section>
+  <section class="card"><h2>就寝時刻</h2><p class="muted">主睡眠の日付は起床日。複数記録がある日は最初の就寝時刻を表示します。破線は目標時刻です。</p><div id="bedtime-chart" class="sleep-chart"></div><div class="chart-detail" aria-live="polite"><span class="muted">棒や点を選ぶと、その日の詳細を表示します。</span></div><details><summary>日別の数値</summary><div id="sleep-table" class="table-scroll"></div></details></section>
   <section class="card"><h2>週間レポート</h2>
     <form id="report-form"><label>対象週（この日を含む月〜日）<input type="date" name="week_start" value="${monday(today)}" max="${today}" required></label>
     <label class="task-selection"><input type="checkbox" name="deliver" ${appState.settings.webhook_configured ? "" : "disabled"}>Discord にも送る</label>
@@ -51,8 +52,37 @@ export async function renderAnalyticsPage() {
       data.days,
       appState.settings.target_bedtime,
     );
+    selectDay(data.days, null);
     select("#sleep-table").innerHTML =
-      `<table><thead><tr><th>日付</th><th>主睡眠</th><th>昼寝</th><th>就寝</th></tr></thead><tbody>${data.days.map((day) => `<tr><td>${day.date}</td><td>${durationLabel(day.main_minutes)}${day.main_incomplete ? "（一部不明）" : ""}</td><td>${durationLabel(day.nap_minutes)}${day.nap_incomplete ? "（一部不明）" : ""}</td><td>${clockLabel(day.bedtime)}</td></tr>`).join("")}</tbody></table>`;
+      `<table><thead><tr><th>日付</th><th>主睡眠</th><th>昼寝</th><th>就寝</th><th>起床</th></tr></thead><tbody>${data.days.map((day) => `<tr><td>${day.date}</td><td>${durationLabel(day.main_minutes)}${day.main_incomplete ? "（一部不明）" : ""}</td><td>${durationLabel(day.nap_minutes)}${day.nap_incomplete ? "（一部不明）" : ""}</td><td>${clockLabel(day.bedtime)}</td><td>${clockLabel(day.wake)}</td></tr>`).join("")}</tbody></table>`;
+  }
+  // 2 つのグラフで同じ日を選択状態にし、それぞれの下の欄に詳細を出す
+  let chartDays = [];
+  function selectDay(days, index) {
+    chartDays = days;
+    for (const chart of document.querySelectorAll(".sleep-chart")) {
+      for (const shape of chart.querySelectorAll("[data-day]"))
+        shape.classList.toggle("selected", Number(shape.dataset.day) === index);
+      const panel = chart.nextElementSibling;
+      if (panel)
+        panel.innerHTML =
+          index == null
+            ? '<span class="muted">棒や点を選ぶと、その日の詳細を表示します。</span>'
+            : dayDetail(days[index]);
+    }
+  }
+  for (const id of ["#duration-chart", "#bedtime-chart"]) {
+    const chart = select(id);
+    const choose = (e) => {
+      const shape = e.target.closest("[data-day]");
+      if (shape) selectDay(chartDays, Number(shape.dataset.day));
+    };
+    chart.addEventListener("click", choose);
+    chart.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      e.preventDefault();
+      choose(e);
+    });
   }
   select("#chart-range").onsubmit = handleAction(async (e) => {
     e.preventDefault();

@@ -10,7 +10,7 @@ func TestSleepSummaryMissingAndMidnight(t *testing.T) {
 	at := func(s string) *time.Time { v, _ := time.Parse(time.RFC3339, s); return &v }
 	rows := []SleepSample{
 		{Date: "2026-09-14", Kind: "main", Minutes: minutes(420), StartedAt: at("2026-09-13T23:00:00+09:00")},
-		{Date: "2026-09-15", Kind: "main", Minutes: minutes(480), StartedAt: at("2026-09-15T01:00:00+09:00")},
+		{Date: "2026-09-15", Kind: "main", Minutes: minutes(480), StartedAt: at("2026-09-15T01:00:00+09:00"), EndedAt: at("2026-09-15T09:05:00+09:00")},
 		{Date: "2026-09-15", Kind: "nap", Minutes: minutes(30)},
 		{Date: "2026-09-16", Kind: "main", Minutes: nil},
 		{Date: "2026-09-16", Kind: "nap", Minutes: nil},
@@ -30,6 +30,9 @@ func TestSleepSummaryMissingAndMidnight(t *testing.T) {
 	}
 	if len(a.Days) != 7 || a.Days[4].MainMinutes != nil || !a.Days[3].MainIncomplete {
 		t.Fatal("missing days or partial durations")
+	}
+	if a.Days[1].Wake == nil || *a.Days[1].Wake != 545 || a.Days[0].Wake != nil {
+		t.Fatal("wake time")
 	}
 	if len(a.Samples) != 7 {
 		t.Fatal("future records must be excluded")

@@ -8,7 +8,7 @@ import (
 )
 
 func (q *Queries) SleepSamples(ctx context.Context, userID, start, end string) ([]domain.SleepSample, error) {
-	rows, err := q.db.QueryContext(ctx, `SELECT id,revision,sleep_date::text,sleep_kind,duration_minutes,started_at FROM sleep_records WHERE user_id=$1 AND is_current AND status='approved' AND sleep_date BETWEEN $2::date AND $3::date ORDER BY sleep_date,started_at FOR SHARE`, userID, start, end)
+	rows, err := q.db.QueryContext(ctx, `SELECT id,revision,sleep_date::text,sleep_kind,duration_minutes,started_at,ended_at FROM sleep_records WHERE user_id=$1 AND is_current AND status='approved' AND sleep_date BETWEEN $2::date AND $3::date ORDER BY sleep_date,started_at FOR SHARE`, userID, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -16,7 +16,7 @@ func (q *Queries) SleepSamples(ctx context.Context, userID, start, end string) (
 	out := []domain.SleepSample{}
 	for rows.Next() {
 		var s domain.SleepSample
-		if err = rows.Scan(&s.ID, &s.Revision, &s.Date, &s.Kind, &s.Minutes, &s.StartedAt); err != nil {
+		if err = rows.Scan(&s.ID, &s.Revision, &s.Date, &s.Kind, &s.Minutes, &s.StartedAt, &s.EndedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, s)

@@ -48,7 +48,12 @@ export async function renderAgentPage() {
       <small>${escapeHTML(formatDate(run.created_at))} · ${escapeHTML(run.model)} · tool ${run.tool_calls}回 · ${run.steps} steps${run.attempts > 1 ? ` · 試行 ${run.attempts}` : ""}</small>
       ${run.error ? `<small class="agent-error">${escapeHTML(run.error)}</small>` : ""}
     </summary>
-    <div class="agent-steps muted">読み込み中…</div>`;
+    <div class="agent-steps muted">読み込み中…</div>
+    <footer class="agent-run-end"><button type="button" class="quiet">閉じる</button></footer>`;
+    item.querySelector(".agent-run-end button").addEventListener("click", () => {
+      item.open = false;
+      if (item.getBoundingClientRect().top < 0) item.scrollIntoView({ block: "start" });
+    });
     let loaded = false;
     item.addEventListener(
       "toggle",
@@ -65,7 +70,7 @@ export async function renderAgentPage() {
 
 function renderSteps(steps) {
   if (!steps.length)
-    return `<p class="muted">記録がありません（記録機能の追加前の task か、まだ実行されていません）。</p>`;
+    return `<div class="agent-steps"><p class="muted">記録がありません（記録機能の追加前の task か、まだ実行されていません）。</p></div>`;
   let html = "";
   let run = null;
   let runNo = 0;

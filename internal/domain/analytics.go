@@ -13,6 +13,7 @@ type SleepSample struct {
 	Kind      string     `json:"kind"`
 	Minutes   *int       `json:"minutes"`
 	StartedAt *time.Time `json:"started_at"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
 }
 type SleepDay struct {
 	Date           string `json:"date"`
@@ -21,6 +22,7 @@ type SleepDay struct {
 	MainIncomplete bool   `json:"main_incomplete"`
 	NapIncomplete  bool   `json:"nap_incomplete"`
 	Bedtime        *int   `json:"bedtime"`
+	Wake           *int   `json:"wake"` // 主睡眠の最も遅い起床。0〜1439 分
 }
 type SleepAnalytics struct {
 	Start          string        `json:"start"`
@@ -67,7 +69,7 @@ func SummarizeSleep(start, end, through, tz string, records []SleepSample) Sleep
 	for i := range out.Days {
 		day := &out.Days[i]
 		hasMain := false
-		var earliest *time.Time
+		var earliest, latest *time.Time
 		for _, r := range byDate[day.Date] {
 			if r.Kind == "main" {
 				hasMain = true
@@ -81,6 +83,9 @@ func SummarizeSleep(start, end, through, tz string, records []SleepSample) Sleep
 				}
 				if r.StartedAt != nil && (earliest == nil || r.StartedAt.Before(*earliest)) {
 					earliest = r.StartedAt
+				}
+				if r.EndedAt != nil && (latest == nil || r.EndedAt.After(*latest)) {
+					latest = r.EndedAt
 				}
 			} else if r.Kind == "nap" {
 				out.NapCount++
@@ -107,6 +112,11 @@ func SummarizeSleep(start, end, through, tz string, records []SleepSample) Sleep
 			day.Bedtime = &v
 			bedTotal += v
 			bedCount++
+		}
+		if latest != nil {
+			t := latest.In(loc)
+			v := t.Hour()*60 + t.Minute()
+			day.Wake = &v
 		}
 	}
 	if out.DurationDays > 0 {

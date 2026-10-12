@@ -50,7 +50,7 @@ export function durationChart(days) {
       const incomplete =
         day[field === "main_minutes" ? "main_incomplete" : "nap_incomplete"];
       const text = `${day.date} ${label} ${durationLabel(value)}${incomplete ? "（時間不明の記録あり）" : ""}`;
-      drawing += `<rect class="${css}" tabindex="0" aria-label="${escapeHTML(text)}" x="${x(i) - width * 0.33}" y="${y(base + value)}" width="${width * 0.66}" height="${Math.max(1, y(base) - y(base + value))}" rx="3"><title>${escapeHTML(text)}</title></rect>`;
+      drawing += `<rect class="${css}" data-day="${i}" tabindex="0" aria-label="${escapeHTML(text)}" x="${x(i) - width * 0.33}" y="${y(base + value)}" width="${width * 0.66}" height="${Math.max(1, y(base) - y(base + value))}" rx="3"><title>${escapeHTML(text)}</title></rect>`;
       base += value;
     }
     if (day.main_minutes == null && day.nap_minutes == null)
@@ -84,7 +84,22 @@ export function bedtimeChart(days, target) {
     if (i > 0 && days[i - 1].bedtime != null)
       drawing += `<line class="chart-trend" x1="${x(i - 1)}" y1="${y(days[i - 1].bedtime)}" x2="${x(i)}" y2="${y(day.bedtime)}"/>`;
     const text = `${day.date}の主睡眠 就寝 ${clockLabel(day.bedtime)}`;
-    drawing += `<circle class="chart-main" tabindex="0" aria-label="${escapeHTML(text)}" cx="${x(i)}" cy="${y(day.bedtime)}" r="5"><title>${escapeHTML(text)}</title></circle>`;
+    drawing += `<circle class="chart-main" data-day="${i}" tabindex="0" aria-label="${escapeHTML(text)}" cx="${x(i)}" cy="${y(day.bedtime)}" r="5"><title>${escapeHTML(text)}</title></circle>`;
   });
   return frame("就寝時刻の推移。破線は目標時刻", drawing + dateLabels(days, x));
+}
+
+// 図形を選んだ日の詳細。hover の無いスマホでも読めるよう、グラフ下の固定欄に出す。
+export function dayDetail(day) {
+  const part = (minutes, incomplete) =>
+    minutes == null && !incomplete
+      ? "記録なし"
+      : `${durationLabel(minutes)}${incomplete ? "（時間不明の記録あり）" : ""}`;
+  const rows = [
+    ["主睡眠", part(day.main_minutes, day.main_incomplete)],
+    ["昼寝", part(day.nap_minutes, day.nap_incomplete)],
+    ["就寝", clockLabel(day.bedtime)],
+    ["起床", clockLabel(day.wake)],
+  ];
+  return `<strong>${escapeHTML(day.date)}</strong><dl>${rows.map(([k, v]) => `<div><dt>${k}</dt><dd>${escapeHTML(v)}</dd></div>`).join("")}</dl>`;
 }
