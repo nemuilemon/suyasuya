@@ -29,7 +29,7 @@
 
 App Engine / **Compute Engine** / GKE / Cloud Run / Cloud Run functions / Cloud TPU・GPU
 
-→ suyasuya は **GKE**。**条件を満たす。**
+→ suyasuya は **GKE Autopilot**（asia-northeast1）。**条件を満たす。**
 
 ### 2. Google Cloud AI 技術を 1 つ以上
 
@@ -37,7 +37,7 @@ Gemini Enterprise Agent Platform（旧 Vertex AI）/ **Gemini API** / Gemma / Na
 Agent Development Kit (ADK) / Speech-to-Text・Text-to-Speech / Vision AI /
 Natural Language AI / Translation AI
 
-→ suyasuya は **Gemini**（画像読み取り + 提案文生成）。**条件を満たす。**
+→ suyasuya は **Gemini API**（gemini-3.8-flash。画像の読み取り・function calling による判断・文面生成）。**条件を満たす。**
 Gemini API は AI Studio からの直接利用でも可。ただし 1 の条件は別途必須。
 
 ## 提出物

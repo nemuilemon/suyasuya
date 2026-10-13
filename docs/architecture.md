@@ -1,14 +1,22 @@
 # アーキテクチャ（開発・本番）
 
-**状態：方針決定。未実装。**
+**状態：実装済み。2026-10-10 から GKE Autopilot（asia-northeast1）で稼働している。**
+設計段階から変えた点は、末尾の「設計からの変更」にまとめた。
 
 ## 構成
 
-**開発中は local の Docker Compose を使い、提出直前に GKE へ移行する。**
-dev は Cloudflare Tunnel 経由で使い、Cloudflare Access で本人だけを許可する。
-Tunnel の接続先は control に限定する。local の停止中は通知・job 処理も止まる。
-Tunnel は **ホストの既存 daemon を流用**する。Compose に cloudflared は追加せず、
-suyasuya の環境変数に Tunnel token は持たない。control の port はホストの loopback に公開する。
+**本番は GKE Autopilot、開発は local の Docker Compose。**
+
+- **本番**：control・agent・PostgreSQL・Redis を namespace `suyasuya` に置く。
+  PostgreSQL と Redis は StatefulSet + PVC。公開は cluster 内の cloudflared（Cloudflare Tunnel、
+  2 replica + PDB）が control の Service に繋ぐ。外部 LB と Ingress は持たない。
+  NetworkPolicy で、control に入れるのは cloudflared と agent だけにしている。
+  Pod ごとに Workload Identity で別の IAM service account を使い、GCS の権限を control と agent で分ける。
+  手順は [`deploy/README.md`](../deploy/README.md)。
+- **開発**：Compose。Cloudflare Tunnel 経由で使い、Cloudflare Access で本人だけを許可する。
+  Tunnel は **ホストの既存 daemon を流用**する。Compose に cloudflared は追加せず、
+  suyasuya の環境変数に Tunnel token は持たない。control の port はホストの loopback に公開する。
+  local の停止中は通知・task 処理も止まる。
 
 アプリの container は 2 つに割り、DB は **PostgreSQL**、
 control と agent の間は **Redis** を queue として挟む。
@@ -18,7 +26,7 @@ control と agent の間は **Redis** を queue として挟む。
 | container | 役割 |
 |---|---|
 | **control** | web app 本体。HTTP / UI、画像 PUT 用の署名付き URL 発行と完了確認、通知の発火、job の投入。**schema と migration を所有する。** |
-| **agent** | agent loop。queue から job を取り、Gemini を呼ぶ（画像からの読み取り、提案文の生成）。状態を持たない。 |
+| **agent** | agent loop。queue から task を取り、Gemini を呼ぶ（画像からの読み取り、催促の判断と文面、週間レポート）。状態を持たない。 |
 
 両者とも Postgres に接続するが、**agent は自分の role の権限内でだけ触る**。
 実データ table は READ-ONLY、書けるのは結果系だけ。DDL は持たない。
@@ -119,11 +127,11 @@ PostgreSQL の `uploads` には bucket・object 名・サイズ・generation・�
 画像 → agent の読み取り候補 ─┐
                             ├→ 管理 UI で user が確認・修正・承認
 画像なし → 主要数値の手入力 ─┘   → control が sleep_records に保存
-                                 → 評価 job → 応答・次の催促判断
+                                 → 評価 task（未実装）→ 応答・次の催促判断
 ```
 
 - **本人の記録管理**：通常 user が自分の候補を確認し、修正・承認・却下できる。
-  プロンプト / skill を編集する管理者権限とは別にする。
+  プロンプトの編集も本人の版だけに限る。他人の記録・版には触れない。
 - **主要項目**：主睡眠 / 昼寝の種別、開始・終了日時、睡眠時間。
   日付とタイムゾーンを持ち、日跨ぎを扱う。画像や睡眠段階の詳細は必須にしない。
   不明な項目は欠測として保持し、時刻不明の記録を就寝時刻の評価に使わない。
@@ -173,13 +181,10 @@ agent 側の書き方：
   at-least-once で同じ job が 2 回走っても行が増えない
   （[取り方](#取り方) の冪等要求を、ここでは DB 制約として具体化する）
 
-そのうえで **Redis に残る戻りは進捗の pub/sub 1 本だけ**になる。
-完了通知も同じ channel でよい。
-
-通知が揮発してよい理由は、真実がもう Postgres にあるから。
-UI は接続・再接続時と処理待ちの間に Postgres の状態を照会し、通知欠落を補う。
-sweeper は未処理 job の再投入を担い、完了済み job の表示更新とは分ける。
-list で守っていた頃と違い、**通知の取りこぼしが仕事の消失にならない。**
+そのうえで **Redis に戻す経路は持たない。** 進捗の pub/sub も置かなかった。
+UI は画面を開いている間、Postgres の状態を数秒おきに照会する（下の「UI への反映」）。
+sweeper は未処理 task の再投入を担い、完了済み task の表示更新とは分ける。
+真実が Postgres にあるので、**表示の取りこぼしが仕事の消失にならない。**
 
 ### agent の role
 
@@ -206,14 +211,14 @@ agent は screenshot 経由の外部入力を LLM に食わせる、
 role は上記に限る。tool が使う user_id は closure に固定し、
 repository はその user の行だけを扱う。LLM の引数で他人の user_id を指定できない。
 
-### UI への push
+### UI への反映
 
-SSE でよい。WebSocket を持ち出す必要はない。
-control が該当 job の進捗 channel を subscribe し、browser に流す。
+**polling にした。** SSE も WebSocket も使っていない。
+記録画面は 5 秒おきに task 一覧を、ふりかえり画面は 3 秒おきにレポート一覧を、その画面を開いている間だけ取り直す。
+SSE はこの規模には過剰（over-spec）なので入れていない。
 
-**subscribe 時に所有者を検査すること。**
-job_id を知っているだけで他人の進捗が読めてはいけない。
-認証済み user と job の所有者を照合し、tool と同じ user の範囲に制限する。
+所有者の検査は通常の API と同じ。認証済み user の task しか一覧に出ない。
+task_id を知っているだけで他人の進捗が読めることはない。
 
 ### 認証
 
@@ -241,31 +246,29 @@ control に管理 UI を置き、再デプロイせずに内容を微調整で�
 どの情報を先に見るか、どの tool を呼ぶか、結果を受けて追加調査するか、
 材料不足で保留するか、いつ回答を確定して終了するかを微調整できる。
 
-| config_key の例 | 調整する内容 |
+| config_key | 調整する内容 |
 |---|---|
-| `agent.loop` | 共通の判断手順、tool 選択、失敗時の代替手段・再試行の判断、終了・保留の条件 |
+| `agent.loop` | 全 task 共通の指示（判断の根拠、材料不足なら保留、不要な tool を呼ばない、など） |
 | `job.extract_sleep` | OCR の読み取り指示、欠測・曖昧な値の扱い |
-| `job.evaluate_sleep` | 承認済み記録の評価方針 |
-| `job.plan_reminder` | 催促の要否・強度の判断方針 |
-| `persona.arisu` | 応答の声・文体 |
+| `job.plan_reminder` | 催促の目的（就寝・PVT を支える。必要なデータを tool で確かめ、送るかと内容を決める） |
+| `job.weekly_report` | 週間レポートの目的 |
 
-共通の loop 指示と job 別の指示・使用する skill を組み合わせて Gemini に渡す。
-OCR のように原則 1 回の呼び出しで済む job に、不要な tool loop は強制しない。
-反復回数・timeout・通信の再試行上限・tool の許可範囲・user 分離・記録の承認は
+承認済み記録の評価（`job.evaluate_sleep`）と、persona を別の key に分けることは未実装。
+persona は各 user の `agent.loop` に書く。
+
+共通の loop 指示と task 別の指示を組み合わせて Gemini に渡す。
+OCR のように原則 1 回の呼び出しで済む task に、不要な tool loop は強制しない。
+反復回数（4 ラウンド・tool 8 回）・timeout・tool の許可範囲・user 分離・記録の承認は
 コード側で強制し、プロンプトの編集では解除できない。
 
-- **保存先**：`agent_config_versions` に定義の識別子・種類（prompt / skill）・
-  本文・版・更新者・更新日時を保存する。persona もプロンプトの一部として扱う。
-- **管理 UI**：管理者が内容を編集し、新しい版を有効化できる。
-  過去の版を残し、戻せるようにする。通常 user の測定時刻設定とは権限を分ける。
-- **読み込み**：job 開始時に有効な版を確定し、その job 内では固定する。
-  共通 loop 指示を含む使用版を `job_config_versions` に記録し、判断履歴から辿れるようにする。
-  有効化した変更は次に開始する未固定の job から適用し、実行中・再試行中の job は同じ版を使う。
-- **権限**：更新は管理者認証・認可を経た control だけが行う。
-  agent は読み取り専用とし、プロンプトや skill を自分で書き換える tool は持たない。
+- **保存先**：`agent_config_versions` に定義の識別子・本文・版・所有者・作成日時を保存する。
+- **管理 UI**：設定画面で、各 user が自分の版を編集し、新しい版を有効化できる。過去の版は残る。
+- **読み込み**：task 作成時に有効な版を `job_config_versions` に固定し、その task 内では変えない。
+  再試行も同じ版を使う。判断履歴から、どの版で動いたかを辿れる。
+- **権限**：agent は読み取り専用とし、プロンプトを自分で書き換える tool は持たない。
   tool の実装・利用可能な権限・実行上限はコード側で管理する。
-- **初期値**：repo 内に seed を持ち、空の DB へ投入できるようにする。
-  通常の起動やデプロイでは、管理 UI で調整した内容を上書きしない。
+- **初期値**：`internal/domain` の既定文を、user を作るときにその user の版 1 として入れる。
+  既にある版は上書きしない。
 
 ## ハッカソン要件との整合
 
@@ -317,6 +320,10 @@ func buildTools(db DB, uid UserID) []Tool {
 }
 ```
 
+実装は `internal/agent/tools.go` の `NewToolRegistry(data, task)`。task の所有者 ID は
+claim 時に DB から読む。tool の宣言（`getSleepTime`・`getPVTResults`・`getUserSettings`・
+`getNotificationHistory`）に user_id は無い。
+
 守るべき点：
 
 - **schema に user_id を載せない。** 「来ても無視する」ではなく、
@@ -324,7 +331,7 @@ func buildTools(db DB, uid UserID) []Tool {
 - **tool set を job をまたいで使い回さない。** 常駐 process なので、
   cache や global に置くと A の束縛が B の job に残る。
   job ごとに `buildTools` を呼ぶ。
-- **`type UserID string`** のような named type にする。
+- **`type UserID string`** のような named type にする（未対応。いまは素の `string`）。
   素の `string` だと引数の取り違えが compile を通ってしまう。
 
 ### 今回の分離方式
@@ -367,10 +374,10 @@ storage 層の都合を知らないはずの層が、知ってしまっている
   `Query(sql string, args ...any)` ではない。
   `Query`/`Exec` を包んだだけの interface は**何も買っていない**。
   方言はそのまま通り抜け、呼び出し側は SQL を書き続ける。
-- **engine 名は `internal/db/postgres/` の外に出さない。**
+- **engine 名は `internal/repository` の外に出さない。** SQL と driver はこの package に閉じた。
   型名・file 名・package 名のどこにも出さない。出たら設計が漏れている。
 - **接続は path ではなく設定で受ける。** host / port / db / credential。
-- **migration は engine 中立な道具で。** `PRAGMA user_version` 方式は採らない。
+- **migration は番号付きの SQL ファイル（`docker/NN-*.sql`）を順に適用する。** `PRAGMA user_version` 方式は採らない。
 
 ### UserID との接続
 
@@ -424,14 +431,12 @@ tool call の反復上限（上記）と二重に、暴走を時間でも止め�
 user の「中止」は control から来るので、container をまたぐ経路が要る。
 
 ```
-control ──▶ Postgres に中止要求を保存
-        └─▶ Redis pub/sub (cancel channel) ──▶ agent
-                                                 │
-                                    job_id → cancel() の map を引く
+control ──▶ Postgres に中止要求（cancel_requested_at）を保存
+agent   ──▶ 実行中は 1 秒おきに中止要求を確認 ──▶ 見つけたら、その task の cancel()
 ```
 
-agent は job ごとの `cancel` を map に持ち、cancel 通知で該当 job を落とす。
-通知は即時反映の補助とし、agent は開始前・実行中・結果確定時にも DB の中止要求を確認する。
+Redis の pub/sub は使わず、DB の確認だけにした（`internal/agent/process.go`）。
+agent は開始前・実行中・結果確定時に中止要求を見る。
 中止済み job は再投入しない。完了済み job への中止は完了を取り消さない。
 SIGTERM 時は新規受付を止め、猶予時間内は実行中の job を待つ。
 猶予を超えたら root ctx を cancel する。終了に伴う中断は user の中止と区別し、再投入できる。
@@ -459,41 +464,43 @@ progress reporter は **closure で束ねる**。user_id と同じ扱いにす�
 func buildTools(db DB, uid UserID, report ProgressFunc) []Tool
 ```
 
+（進捗の報告は実装していない。UI は polling で状態を読む）
+
 同じ理由で、**user_id も ctx に入れない。**
 job に固有の束縛は closure、process の生死は ctx。この線を混ぜない。
 
-## 未決
+## 決めたこと（旧「未決」）
 
-### 本番 Redis の置き場所
+### 本番 Redis の置き場所 → in-cluster
 
-開発中は Compose 内の Redis を使う。以下は GKE 移行時の選択肢。
+queue の中身を捨てても復旧できる設計にしたので、**in-cluster の StatefulSet** にした。
+Memorystore は使っていない（最小構成でもクーポンを食うため）。
 
-| 案 | 利点 | 難点 |
-|---|---|---|
-| **in-cluster** | 安い。Deployment 1 つで済む | 落ちたら queue が飛ぶ（上の設計で許容済み） |
-| **Memorystore** | 運用しなくていい | 最小構成でもクーポンを食う |
+### DB の置き場所 → in-cluster
 
-queue の中身を捨てても復旧できる設計にしたので、**in-cluster で足りる**。
-要決定だが、締切を踏まえると in-cluster 推し。
+**StatefulSet + PVC**（`standard-rwo`）。Cloud SQL は使っていない。
+移行時は local DB をバックアップし、記録と設定を本番へ引き継いだ。
+dev の scheduler を止めてから本番を有効にし、通知の二重送信を防いだ。
 
-### DB の置き場所（暫定：in-cluster）
-
-開発中は **Compose + 永続 volume**。GKE 移行後は **StatefulSet + PVC** を暫定とする。
-移行時は local DB をバックアップし、記録と設定を本番へ引き継ぐ。
-dev の scheduler を止めてから本番を有効にし、通知の二重送信を防ぐ。
-
-注意点を 1 つだけ記録しておく。
-cluster を作り直すと**データが消えうる**。審査用のテストアカウントと
-サンプルデータは、**再投入できる seed script を用意しておくこと**。
-PVT の実測データ（`pvt.md` 参照）は積み上げに lead time があるので、
-消すと取り返しがつかない。**定期的に dump を手元に落とす。**
-
-不安が残るなら Cloud SQL に移すが、その判断は後でよい。
+cluster を作り直すと**データが消えうる**。PVT の実測データ（`pvt.md` 参照）は
+積み上げに lead time があるので、消すと取り返しがつかない。**定期的に dump を手元に落とす。**
+審査用のテストアカウントは、本人の記録を複製して作る script で作り直せる（script は Git 管理外）。
 
 ## 運用上の注意
 
-**GKE 移行準備時に確認すること。**
+- **GKE は cluster の管理費がかかる。** クーポン($300) を食う速度に直結するので、**Autopilot** にした
+- 外部 LB の転送ルール 2 本（約 $18/月）を避けるため、公開は Ingress ではなく
+  cluster 内の cloudflared にした（2026-10-10）
+- Cloud Run に比べて ops は重い。日常の操作は `./suyasuyactl.sh`（`gke deploy` / `gke migrate` など）にまとめた
 
-- **GKE は cluster の管理費がかかる。** クーポン($300) を食う速度に直結するので、
-  Autopilot か、無料枠の対象になる構成かを確認する
-- **Cloud Run に比べて ops が明確に重い。** 残り日数に対して構築コストが見合うか
+## 設計からの変更
+
+| 設計 | 実装 |
+|---|---|
+| 提出直前に GKE へ移行 | 2026-10-10 から GKE Autopilot で稼働 |
+| UI への push は SSE、進捗は Redis pub/sub | polling（画面を開いている間、3〜5 秒おき） |
+| 中止は Redis pub/sub で agent に届ける | DB の中止要求を agent が 1 秒おきに確認 |
+| 公開は GCE Ingress | cluster 内の cloudflared（Cloudflare Tunnel） |
+| `internal/db/postgres/` | `internal/repository` |
+| `type UserID string` | 未対応（素の `string`。所有者の束縛は closure と repository の条件で守る） |
+| 承認後の評価 job、`persona.arisu` | 未実装。persona は各 user の `agent.loop` に書く |

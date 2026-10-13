@@ -2,7 +2,8 @@
 
 **定時に寝ることを支える agent。**
 
-第 5 回 Agentic AI Hackathon with Google Cloud 応募作品（開発中）。
+第 5 回 Agentic AI Hackathon with Google Cloud 応募作品。GKE Autopilot（asia-northeast1）で稼働している。
+審査用の URL とテストアカウントは、提出フォームの「動作確認の方法」に書いた。
 
 ## つくるもの
 
@@ -12,10 +13,10 @@
 
 だから suyasuya は **記録の手間を減らし、行動を支える。**
 
-睡眠はデバイスが自動で測る。**screenshot を agent が読み取り、user が管理 UI で
+睡眠はデバイスが自動で測る。**screenshot を Gemini が読み取り、user が管理 UI で
 確認・修正して承認する。画像なしで主要数値だけ手入力してもよい。**
 夜の睡眠に加えて昼寝も記録でき、特に誤検知のある昼寝は追加・修正・除外できる。
-承認した記録の蓄積・傾向の把握・声のかけ方の判断は、agent の側でやる。
+承認した記録の傾向の把握と、声のかけ方の判断は、agent の側でやる。
 
 そのうえで agent は **Discord で催促する。**「今から寝ろ」と。
 
@@ -23,12 +24,16 @@
 長さは意志で増やしにくいが、時刻は寄せられる。
 睡眠の規則性は、死亡リスクの予測力で睡眠時間を上回るという報告もある（Windred ら, 2024）。
 
-| | |
+| | いま動いているもの |
 |---|---|
-| **催促** | 今夜送るか、どの強度で送るかを判断して Discord に投げる |
-| **観測** | 翌日上がった記録から、実際に就寝時刻が寄ったかを読む |
-| **学習** | 効いていない打ち方をやめ、効く打ち方に寄せる |
-| **根拠** | PVT（反応時間）で、主観だけでは気づきにくい日中の機能の変化を捉える |
+| **記録** | screenshot を Gemini が読み取り、user が確認・承認する。手入力も可 |
+| **催促** | 設定時刻に agent が承認済み記録・PVT・通知履歴を tool で読み、送るか・何を伝えるかを判断して Discord に送る。送らないと決めたときも理由を残す |
+| **ふりかえり** | 睡眠時間・就寝時刻のグラフと、agent が書く週間レポート |
+| **根拠** | PVT（1 分の反応時間テスト）で、主観だけでは気づきにくい日中の機能の変化を捉える |
+| **可観測性** | agent が呼んだ tool・引数・結果・判断の理由を「agent ログ」で読み返せる |
+
+まだ無いもの：声かけの効き目を翌日の記録で評価し、打ち方を変える loop と、
+スマートウォッチからの自動取り込み。目指す形は [`docs/concept.md`](docs/concept.md) にある。
 
 agent の人格は各ユーザーの base prompt で定義する。「ありす」は nemuilemon の agent であり、全員共通の人格ではない。
 
@@ -42,50 +47,43 @@ agent の人格は各ユーザーの base prompt で定義する。「ありす�
 - **睡眠記録の確認・承認** —— screenshot の読み取り結果、または主要数値の手入力。昼寝も対象
 - **PVT 1 分**（能動的な入力）—— 日中の機能の計測
 
-PVT の測定時刻は user が設定する。
+PVT の測定時刻と目標の就寝時刻は user が設定する。
 
 ## 技術
 
-- **Go** —— agent loop は framework を使わず自前で書く
-- **Gemini** —— 画像の読み取り・agent の判断・文面生成のすべて
-- **Docker Compose + Cloudflare Tunnel** —— 自分専用の local dev（Access で本人のみ許可）
-- **Google Cloud（GKE）** —— 提出直前に移行する本番環境
-- **PostgreSQL / Redis** —— 記録の真実と job queue
+- **Go** —— control（web UI・API・scheduler）と agent の 2 バイナリ。agent loop は framework を使わず自前で書いた
+- **Gemini API（gemini-3.8-flash）** —— 画像の読み取り・function calling による判断・文面生成のすべて
+- **Google Cloud（GKE Autopilot）** —— 本番。control・agent・PostgreSQL・Redis を同じ cluster に置き、公開は cluster 内の cloudflared（Cloudflare Tunnel）で行う
 - **Cloud Storage** —— 画像保存。browser から署名付き URL へ直接 PUT
+- **PostgreSQL / Redis** —— 記録の真実と task queue。Redis が運ぶのは task の id だけ
+- **Docker Compose + Cloudflare Tunnel** —— 自分専用の local dev（Access で本人のみ許可）
 - **Discord** —— 催促の出口（`Notifier` で切ってあり、差し替え可能）
 
-agent loop の判断手順・tool 選択・終了条件を含むプロンプト / skill は PostgreSQL に保存し、
-control の管理 UI で編集・微調整できる設計にする。
-Pixel Watch のデータ取り込み・睡眠記録との自動関連付けに向けた schema も用意する（連携は未実装）。
+agent の判断手順・目的・OCR の指示は PostgreSQL に版として保存し、
+管理画面の「設定」から再デプロイせずに調整できる。task は開始時の版に固定される。
+Pixel Watch のデータ取り込みに向けた table も用意してある（取得・同期は未実装）。
 
-DB の初期定義は [`schema.sql`](schema.sql)。PostgreSQL 16 以上の空の DB に、
-role を作成できる管理者で適用する。
-
-```sh
-psql -v ON_ERROR_STOP=1 -d suyasuya -f schema.sql
-psql -v ON_ERROR_STOP=1 -d suyasuya -f tests/schema.sql
-```
-
-control / agent の role は `NOLOGIN` で作成する。`.env` のパスワードを使った
-ログイン設定は今後の bootstrap で行う。アプリ・Compose は未実装。
+DB の初期定義は [`schema.sql`](schema.sql)。Compose は空の DB の初回起動時にこれを適用する。
+既存 DB への変更は `docker/NN-*.sql` を順に適用する。k8s での手順は [`deploy/README.md`](deploy/README.md)。
 
 ## 設計
 
-開発中。`docs/` に置いている。
+`docs/` に置いている。どれも 2026-10-13 時点の実装に合わせた。
 
 | | |
 |---|---|
-| `concept.md` | 何を中心に置くか。催促の判断と persona |
-| `pvt.md` | 反応時間テストの取り込み |
-| `architecture.md` | 本番構成、closure による user 分離と DB role の操作権限 |
-| `hackathon.md` | 応募要件 |
+| [`concept.md`](docs/concept.md) | 何を中心に置くか。催促の判断と persona。実装済みと今後を分けて書いた |
+| [`architecture.md`](docs/architecture.md) | 本番構成、queue、closure による user 分離、DB role の操作権限 |
+| [`pvt.md`](docs/pvt.md) | 反応時間テストの測り方と指標 |
+| [`hackathon.md`](docs/hackathon.md) | 応募要件の控え |
+| [`deploy/README.md`](deploy/README.md) | GKE / Kubernetes の構築手順 |
 
-## データについて
+## サンプルデータ
 
-`data/` 以下は開発用のサンプル。実際の睡眠記録を含むため、
-公開範囲を変えるときは中身を確認すること。
+repo に本人の睡眠記録は入れていない（`data/` は Git 管理外）。
+読み取りを試すための架空の睡眠画面を [`asset/dummy-sleep/`](asset/dummy-sleep/) に置いた。
 
-## MVP の起動
+## local での起動（Docker Compose）
 
 `.env.sample` を `.env` にコピーし、DB の3つのパスワード、`APP_PASSWORD`（12文字以上）、
 `GEMINI_API_KEY` と GCS 設定を入れる。初回起動で管理者を作成する。
@@ -111,13 +109,15 @@ ADC の identity は bucket の object 読み取り権限と、署名用 SA の
 
 ### 利用できる機能
 
-- 主睡眠・昼寝の手入力、訂正、削除、変更履歴
-- browser から GCS へ署名付き PUT → OCR job → 確認・承認／却下
-- Gemini による OCR、失敗時の再試行と中止、agent 停止後の期限付き job 復旧
-- PVT 1分測定、生データ保存、反応時間の集計、中断記録
-- 測定時刻・就寝時刻・timezone の設定、OCR / agent loop のプロンプト版管理
+- 記録：主睡眠・昼寝の手入力、訂正、削除、変更履歴
+- 読み取り：browser から GCS へ署名付き PUT → OCR task → 確認・承認／却下。失敗時の再試行と中止、agent 停止後の期限付き復旧
+- ふりかえり：睡眠時間・就寝時刻のグラフ、日別の数値、週間レポート（手動、または週 1 回の自動送信）
+- PVT：1 分測定、生データ保存、反応時間の集計、中断記録
+- 自動通知：就寝・PVT の設定時刻に、agent が送信の要否と本文を判断して Discord に送る
+- agent ログ：task ごとの tool 呼び出し・モデルの各ラウンド・最終判断
+- 設定：測定時刻・就寝時刻・timezone、Discord Webhook、agent の指示（共通・OCR・催促・週次レポート）の版管理
 
-Discord に就寝・PVT の通知を送る。複雑な agent 判断・watch 自動取り込みは未実装。
+watch の自動取り込みと、声かけの効き目を評価して打ち方を変える処理は未実装。
 OCR は job 作成時の指示の版に固定し、再試行でも同じ版を使う。
 画像内の日付や主睡眠／昼寝が不明な場合は、ユーザーが確認して入力する。
 PVT はブラウザーの timing を用いる簡易測定で、医療機器としての測定ではない。
@@ -146,10 +146,11 @@ DB と queue は named volume に永続化する。`docker compose down` で停�
 - `internal/service`：承認・記録更新・PVT 集計などの処理。HTTP request/response は持たない。
 - `internal/service/ocr`：Gemini による画像の読み取り。
 - `internal/repository`：DB 接続、SQL、scan、transaction。ユーザー向け query は user_id で絞る。
-- `internal/agent`：Redis queue の取得、lease・中止・結果確定を共通管理。
-- `internal/agent`：目的に基づく判断、tool 呼び出し、モデルとの対話ループ。OCR は専用 service を維持する。
+- `internal/agent`：Redis queue からの task 取得、lease・中止・結果確定の共通処理と、
+  目的に基づく判断・tool 呼び出し・モデルとの対話ループ（`Reasoner`）、agent ログの記録。OCR は専用 service を維持する。
 - `internal/notifier`：Discord 配信と送信確認。
 - `internal/domain`：入力・結果・エラーの型。
+- `internal/platform`：環境変数の読み取り・ID 生成など、両バイナリ共通の小さな処理。
 - `internal/web`：管理画面。`#/record` は入力・OCR 確認、`#/records` は保存済み一覧。
 
 control と agent は別バイナリ・別イメージとしてビルドする。
@@ -166,7 +167,7 @@ agent は router・handler・管理画面を import しない。control は Gemi
 agent はタスク種別と handler の対応を `cmd/agent/main.go` で登録する。
 取得・lease・中止・結果保存は `internal/agent` が共通で扱い、handler は
 `domain.Task`（所有者・種別・JSON input 等）から JSON の結果を返す。
-現在の登録は `extract_sleep` と `plan_reminder`。未登録の種別は失敗として保存する。
+現在の登録は `extract_sleep`・`plan_reminder`・`weekly_report`。未登録の種別は失敗として保存する。
 タスク追加時は handler と投入元を追加する。画面の画像承認は OCR 専用。
 
 設定画面で Discord Webhook URL を保存・変更・削除できる。
