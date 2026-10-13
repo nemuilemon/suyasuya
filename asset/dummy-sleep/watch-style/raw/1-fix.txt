@@ -1,0 +1,1 @@
+Edit the reference image. Keep everything identical (layout, colors, all text, the hypnogram shapes) except the time axis under the sleep chart: it must have exactly two labels, "0:21" at the far left end and "7:52" at the far right end of the chart. Remove the dashed vertical line and the "7:52" label from the middle. No other time labels.

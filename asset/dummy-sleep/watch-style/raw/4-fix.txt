@@ -1,0 +1,1 @@
+Edit the reference image. Keep everything identical (layout, colors, all Japanese text, the hypnogram shapes) except the time axis under the sleep chart: it must have exactly two labels, "13:52" at the far left end and "14:34" at the far right end. Remove the middle labels "14:06" and the duplicated "14:34" and their dashed vertical lines. No other time labels.
